@@ -1,0 +1,75 @@
+# 智能 PS · 配置模板
+# 复制为 config/config.toml 后生效（Web 界面的「设置」面板会直接写这个文件）
+
+[app]
+host = "127.0.0.1"
+port = 8765
+
+[engine]
+# 默认引擎：mock（本地、0 元、不联网）/ seedream（火山方舟）
+default = "mock"
+candidates = 3
+
+# ─────────────────────────────────────────────────────────────
+# ★ API 填入口：把 api_key 填上，并把 default 改成 "seedream" 即可联网生成
+# ─────────────────────────────────────────────────────────────
+[engines.seedream]
+enabled = false
+api_key = ""                                       # ← 这里填火山方舟 API Key
+base_url = "https://ark.cn-beijing.volces.com/api/v3"
+model = "doubao-seedream-5-0-flash-260915"         # 0.12 元/张；★必须带日期后缀，否则 404 InvalidEndpointOrModel
+size = "2K"
+watermark = false
+timeout = 180
+
+[engines.mock]
+enabled = true
+
+[quality]
+# 保真分档阈值在 server/app/pipeline/fidelity.py 顶部（改完必跑 bench_fidelity.py）
+# min_fidelity 已废弃，保留只为兼容旧配置
+min_fidelity = 0.90
+min_style = 0.60
+
+# 语义判定（视觉模型）：判断"是不是同一款产品""文字有没有乱码"
+# auto = 有可用模型就启用，没有就跳过（批次头会说明）；off = 强制关闭
+judge = "auto"
+judge_model = ""      # 留空自动挑，见 pipeline/judge.py 的 CANDIDATES
+judge_max_side = 768
+
+# ─────────────────────────────────────────────────────────────
+# 前后对比效果图标准（量化值，见 docs/04-效果图制图标准.md）
+# 由 scripts/check_compare.py 读取并逐项判定；改这里 = 改质检口径
+# ─────────────────────────────────────────────────────────────
+[compare]
+width = 1080                      # 4:5 竖版
+height = 1350
+seam_px = 5                       # 中间白缝宽度，容差 4–6
+jpeg_quality = 95
+
+tag_size = 40                     # 「使用前/后」字号
+tag_stroke = 3
+day_size = 17                     # DAY 字号
+day_stroke = 2
+legal_size = 13                   # 底部合规小字
+legal_margin_bottom = 26
+
+bg_probe_corner = 0.22            # 四角探针框边长占比
+bg_probe_top = 0.16               # 顶部探针带高度占比
+bg_edge_max = 0.025               # 背景边缘密度上限：超出=有家具/杂物轮廓
+bg_hf_max = 5.0                   # 背景高频上限：超出=有纹理，不像单色墙
+bg_top1_min = 0.12                # 背景主色集中度下限
+bg_luma_min = 80.0                # 背景亮度带：防止纯白影棚感或过暗
+bg_luma_max = 210.0
+
+bg_edge_max_full = 0.055          # 全身镜面自拍（家居场景）：墙面/地板/踢脚线属真实场景
+bg_hf_max_full = 6.0
+bg_top1_min_full = 0.10
+
+headroom_min = 0.08               # 头顶留白（软指标）
+headroom_max = 0.18
+
+height_match_max = 0.03           # 左右头顶线位置差上限（软指标，画布高比例）
+
+wm_box = [0.85, 0.92]             # 水印检测区左上角
+wm_edge_delta_max = 0.02          # 近白笔画占比上限

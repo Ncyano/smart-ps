@@ -1,0 +1,568 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>智能 PS · 自动 P 图产线</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --line:#2a2f3a;
+    --text:#e6e9ef; --dim:#8b93a7; --accent:#5b8def; --ok:#3ecf8e; --warn:#f0b429; --bad:#ef5b5b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+    font:14px/1.6 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+  header{display:flex;align-items:center;gap:12px;padding:14px 20px;
+    border-bottom:1px solid var(--line);background:var(--panel);position:sticky;top:0;z-index:10}
+  header h1{font-size:15px;margin:0;font-weight:600;letter-spacing:.3px}
+  header .tag{font-size:11px;color:var(--dim);border:1px solid var(--line);
+    padding:2px 7px;border-radius:99px}
+  header .sp{flex:1}
+  .wrap{display:grid;grid-template-columns:minmax(360px,440px) 1fr;gap:18px;
+    padding:18px 20px;align-items:start}
+  @media (max-width:1000px){.wrap{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .card h2{font-size:13px;margin:0 0 10px;color:var(--dim);font-weight:600;
+    text-transform:uppercase;letter-spacing:.6px}
+  .drop{border:1px dashed var(--line);border-radius:10px;padding:16px;text-align:center;
+    color:var(--dim);cursor:pointer;transition:.15s;background:var(--panel2)}
+  .drop:hover,.drop.over{border-color:var(--accent);color:var(--text)}
+  .thumbs{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+  .thumb{position:relative;width:66px;height:66px;border-radius:8px;overflow:hidden;
+    border:1px solid var(--line)}
+  .thumb img{width:100%;height:100%;object-fit:cover;display:block}
+  .thumb button{position:absolute;top:2px;right:2px;width:18px;height:18px;border:0;
+    border-radius:99px;background:rgba(0,0,0,.65);color:#fff;font-size:11px;line-height:1;
+    cursor:pointer;padding:0}
+  label.f{display:block;font-size:12px;color:var(--dim);margin:14px 0 6px}
+  textarea,select,input{width:100%;background:var(--panel2);color:var(--text);
+    border:1px solid var(--line);border-radius:8px;padding:9px 10px;font:inherit;outline:none}
+  textarea{resize:vertical;min-height:76px}
+  textarea:focus,input:focus,select:focus{border-color:var(--accent)}
+  .row{display:flex;gap:10px}
+  .row>*{flex:1}
+  button.primary{width:100%;margin-top:16px;padding:11px;border:0;border-radius:9px;
+    background:var(--accent);color:#fff;font-weight:600;font-size:14px;cursor:pointer}
+  button.primary:disabled{opacity:.5;cursor:progress}
+  button.ghost{background:transparent;color:var(--dim);border:1px solid var(--line);
+    border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit}
+  button.ghost:hover{color:var(--text);border-color:var(--accent)}
+  .note{font-size:12px;color:var(--dim);margin-top:10px;line-height:1.5}
+  .results{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+  .cand{background:var(--panel2);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .cand.chosen{border-color:var(--ok);box-shadow:0 0 0 1px var(--ok) inset}
+  .cand img{width:100%;display:block;background:#000;max-height:430px;object-fit:contain}
+  .cand .body{padding:10px 12px}
+  .badges{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+  .badge{font-size:11px;padding:2px 7px;border-radius:99px;border:1px solid var(--line);color:var(--dim)}
+  .badge.ok{color:var(--ok);border-color:rgba(62,207,142,.4)}
+  .badge.warn{color:var(--warn);border-color:rgba(240,180,41,.4)}
+  .cand a{color:var(--accent);font-size:12px;text-decoration:none}
+  .empty{color:var(--dim);text-align:center;padding:60px 20px;border:1px dashed var(--line);
+    border-radius:12px}
+  pre{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:10px;
+    font-size:11.5px;overflow:auto;max-height:240px;color:#b8c0d0;margin:8px 0 0}
+  .kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-top:10px}
+  .kv div{background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  .kv b{display:block;font-size:16px;font-weight:600}
+  .kv span{font-size:11px;color:var(--dim)}
+  dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);
+    border-radius:12px;padding:0;width:min(520px,92vw)}
+  dialog::backdrop{background:rgba(0,0,0,.6)}
+  .dlg-h{display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line)}
+  .dlg-h h3{margin:0;font-size:14px;flex:1}
+  .dlg-b{padding:18px}
+  .dlg-f{padding:0 18px 18px;display:flex;gap:10px;justify-content:flex-end}
+  .hint{font-size:11.5px;color:var(--dim);margin-top:6px}
+  button.ghost.mini{padding:3px 9px;font-size:12px;border-radius:7px}
+  .exportbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:16px;
+    padding:12px 14px;background:var(--panel2);border:1px solid var(--line);border-radius:10px}
+  .exportbar select{width:auto;min-width:150px;padding:6px 8px;font-size:12.5px}
+  .exportbar button.primary{width:auto;margin:0;padding:7px 16px;font-size:13px}
+  .progressbox{padding:60px 24px;border:1px dashed var(--line);border-radius:12px;max-width:520px;
+    margin:0 auto}
+</style>
+</head>
+<body>
+<header>
+  <h1>智能 PS</h1>
+  <span class="tag">素材 + 例图 + 文字 → 成品</span>
+  <span class="sp"></span>
+  <button class="ghost" id="btnSet">设置 / API Key</button>
+</header>
+
+<div class="wrap">
+  <!-- 左：输入 -->
+  <div class="card">
+    <h2>① 拍摄素材</h2>
+    <div class="drop" id="dropMat">点击或拖入素材（可多张，会自动选出最好的一张当主参考）</div>
+    <input type="file" id="fileMat" accept="image/*" multiple hidden />
+    <div class="thumbs" id="thMat"></div>
+
+    <h2 style="margin-top:18px">② 往期例图</h2>
+    <div class="drop" id="dropEx">点击或拖入往期成品（定义风格，不照搬内容）</div>
+    <input type="file" id="fileEx" accept="image/*" multiple hidden />
+    <div class="thumbs" id="thEx"></div>
+
+    <label class="f">③ 文字修饰</label>
+    <textarea id="instruction" placeholder="例：背景换成纯白，主体居中，保留 Logo 与纹理，不要改变产品形状"></textarea>
+
+    <label class="f" style="margin-top:12px">④ 工艺模板</label>
+    <select id="template"></select>
+    <div class="note" id="tplDesc"></div>
+
+    <label class="f" style="margin-top:12px">⑤ 产品品类</label>
+    <select id="category">
+      <option value="auto" selected>自动识别（推荐）</option>
+      <option value="skincare">涂抹类化妆品（气垫 / 面霜 / 精华）</option>
+      <option value="oral">可食用（胶囊 / 口服液 / 粉剂）</option>
+    </select>
+    <div class="note">文案说「每天一粒」、产品却是气垫霜时，会在花额度之前直接拦下。</div>
+
+    <div id="copyBox" style="display:none">
+      <label class="f" style="margin-top:10px">标题</label>
+      <input id="cpTitle" type="text" placeholder="例：奶油肌气垫 遮瑕不卡粉" />
+      <label class="f" style="margin-top:8px">副标题</label>
+      <input id="cpSub" type="text" placeholder="例：轻薄贴肤 · 持妆一整天" />
+      <label class="f" style="margin-top:8px">卖点（每行一条，最多 3 条）</label>
+      <textarea id="cpPoints" placeholder="一层盖住痘印与红血丝&#10;微米级粉体贴肤，干皮也不卡纹&#10;含保湿成分，补妆同时养肤"></textarea>
+      <label class="f" style="margin-top:8px">角标</label>
+      <input id="cpTag" type="text" placeholder="例：油皮亲妈（可留空）" />
+    </div>
+
+    <div class="row" style="margin-top:12px">
+      <div>
+        <label class="f">引擎</label>
+        <select id="engine"></select>
+      </div>
+      <div>
+        <label class="f">候选数</label>
+        <select id="cands">
+          <option value="2">2</option>
+          <option value="3" selected>3</option>
+          <option value="4">4</option>
+        </select>
+      </div>
+    </div>
+
+    <button class="primary" id="btnRun">生成成品</button>
+    <div class="note" id="note">未填 API Key 时会用本地 mock 引擎跑通全链路（0 元、不联网）。</div>
+  </div>
+
+  <!-- 右：结果 -->
+  <div class="card">
+    <h2>结果</h2>
+    <div id="result"><div class="empty">还没有生成。左侧放素材，点「生成成品」。</div></div>
+  </div>
+</div>
+
+<dialog id="dlg">
+  <form method="dialog">
+    <div class="dlg-h"><h3>设置 · API 填入口</h3>
+      <button class="ghost" value="cancel">关闭</button></div>
+    <div class="dlg-b">
+      <label class="f">火山方舟 API Key</label>
+      <input id="cfgKey" type="password" placeholder="粘贴 sk-... 或 ARK API Key" autocomplete="off" />
+      <div class="hint">保存后写入 config/config.toml，接口只回传掩码，不回传明文。</div>
+
+      <label class="f">Base URL</label>
+      <input id="cfgBase" type="text" />
+
+      <label class="f">模型 ID</label>
+      <input id="cfgModel" type="text" />
+      <div class="hint">Flash：doubao-seedream-5-0-flash（0.12 元/张）· Pro：doubao-seedream-5-0-pro（0.3 元/张）</div>
+
+      <label class="f">输出尺寸</label>
+      <input id="cfgSize" type="text" placeholder="2K / 1.5K / 1K" />
+    </div>
+    <div class="dlg-f">
+      <button class="ghost" id="btnSave" value="save">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+const state = { materials: [], exemplars: [] };
+
+const $ = (id) => document.getElementById(id);
+
+function readAsDataURL(file) {
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(r.result);
+    r.onerror = rej;
+    r.readAsDataURL(file);
+  });
+}
+
+function renderThumbs(kind) {
+  const box = kind === "materials" ? $("thMat") : $("thEx");
+  box.innerHTML = "";
+  state[kind].forEach((item, i) => {
+    const d = document.createElement("div");
+    d.className = "thumb";
+    d.innerHTML = `<img src="${item.data_url}" alt=""><button title="移除">×</button>`;
+    d.querySelector("button").onclick = () => { state[kind].splice(i, 1); renderThumbs(kind); };
+    box.appendChild(d);
+  });
+}
+
+async function addFiles(kind, files) {
+  for (const f of Array.from(files)) {
+    if (!f.type.startsWith("image/")) continue;
+    state[kind].push({ name: f.name, data_url: await readAsDataURL(f) });
+  }
+  renderThumbs(kind);
+}
+
+function wireDrop(dropId, inputId, kind) {
+  const drop = $(dropId), input = $(inputId);
+  drop.onclick = () => input.click();
+  input.onchange = () => { addFiles(kind, input.files); input.value = ""; };
+  ["dragenter", "dragover"].forEach(e => drop.addEventListener(e, ev => {
+    ev.preventDefault(); drop.classList.add("over");
+  }));
+  ["dragleave", "drop"].forEach(e => drop.addEventListener(e, ev => {
+    ev.preventDefault(); drop.classList.remove("over");
+  }));
+  drop.addEventListener("drop", ev => addFiles(kind, ev.dataTransfer.files));
+}
+
+wireDrop("dropMat", "fileMat", "materials");
+wireDrop("dropEx", "fileEx", "exemplars");
+
+// ─── 配置 ───
+async function loadConfig() {
+  const cfg = await (await fetch("/api/config")).json();
+  const sd = cfg.engines.seedream || {};
+  $("cfgBase").value = sd.base_url || "";
+  $("cfgModel").value = sd.model || "";
+  $("cfgSize").value = sd.size || "2K";
+  $("cfgKey").placeholder = sd.api_key_set ? "已保存（留空则不修改）" : "粘贴 API Key";
+
+  const engines = await (await fetch("/api/engines")).json();
+  const sel = $("engine");
+  sel.innerHTML = "";
+  engines.engines.forEach(e => {
+    const opt = document.createElement("option");
+    opt.value = e.id;
+    opt.textContent = `${e.id}${e.available ? "" : "（不可用 → 自动回退）"}`;
+    if (e.id === cfg.engine.default) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  $("note").textContent = sd.api_key_set
+    ? "已配置 API Key：选 seedream 会调用云端（Flash 约 0.12 元/张）。"
+    : "未填 API Key：会自动用本地 mock 引擎跑通全链路（0 元、不联网）。";
+}
+
+$("btnSet").onclick = () => $("dlg").show();
+$("btnSave").onclick = async () => {
+  const engines = { seedream: { base_url: $("cfgBase").value.trim(), model: $("cfgModel").value.trim(), size: $("cfgSize").value.trim() } };
+  const key = $("cfgKey").value.trim();
+  if (key) { engines.seedream.api_key = key; engines.seedream.enabled = true; }
+  const res = await fetch("/api/config", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ engines })
+  });
+  if (!res.ok) alert((await res.json()).error || "保存失败");
+  $("dlg").close();
+  loadConfig();
+};
+
+// ─── 生成 ───
+const TIER_TEXT = { A: "A 可信", B: "B 存疑", C: "C 不可用" };
+const TIER_CLS = { A: "ok", B: "warn", C: "warn" };
+
+function verdictBadge(c) {
+  const tier = c.tier || (c.verdict === "可交付" ? "A" : "B");
+  const cls = TIER_CLS[tier] || "warn";
+  return `<span class="badge ${cls}" title="${
+    tier === "A" ? "结构、比例、清晰度三项都过关，可直接用"
+      : tier === "B" ? "有一项存疑，值得人看一眼"
+      : "有硬伤（产品不在/比例被改/糊了）"
+  }">${TIER_TEXT[tier] || c.verdict}</span>`;
+}
+
+function semanticBadge(c) {
+  const s = c.semantic;
+  if (!s || !s.checked) return "";
+  if (s.same_product === false) return '<span class="badge warn">语义：不是同一款</span>';
+  if (s.text_ok === false) return '<span class="badge warn">语义：文字可疑</span>';
+  if (s.aspect_ok === false) return '<span class="badge warn">语义：比例可疑</span>';
+  return `<span class="badge ok">语义 OK${s.confidence ? " " + s.confidence : ""}</span>`;
+}
+
+function layoutBadge(c) {
+  const l = c.layout;
+  if (!l) return "";
+  return l.ok
+    ? '<span class="badge ok">版式 OK</span>'
+    : '<span class="badge warn" title="' + (l.reasons || []).join("；") + '">版式异常</span>';
+}
+
+function scoreLine(c) {
+  const s = c.scores || {};
+  const f = v => (v === null || v === undefined) ? "—" : v;
+  // 比例在 15% 以内不下结论（调色本身就能漂 10% 以上），显示"正常"而不是一个假精确的数字
+  let sp;
+  if (s.spread === null || s.spread === undefined) sp = "未校验";
+  else if (s.spread <= 0.15) sp = "正常";
+  else sp = `±${(s.spread * 100).toFixed(0)}%`;
+  const sh = (s.sharp === null || s.sharp === undefined) ? "未校验" : f(s.sharp);
+  const parts = [`结构 ${f(s.structure)}`, `比例 ${sp}`, `清晰 ${sh}`];
+  if (s.style !== undefined) parts.push(`风格 ${s.style}`);
+  return `<span class="badge">${parts.join(" · ")}</span>`;
+}
+
+function renderBatch(b) {
+  const cost = b.cost_cny > 0 ? `${b.cost_cny.toFixed(2)} 元` : "0 元（本地）";
+  const produced = b.produced ?? b.candidates.length;
+  const requested = b.requested ?? b.candidates.length;
+  const partial = produced < requested
+    ? `<div class="note" style="color:var(--warn)">要求 ${requested} 张，实际产出 ${produced} 张${
+        (b.gen_errors || []).length ? "：" + b.gen_errors.join("；") : ""}</div>`
+    : "";
+  const t = b.tiers;
+  const tierLine = t
+    ? `<div class="note">分档：A 可信 ${t.A} · B 存疑 ${t.B} · C 不可用 ${t.C}　
+         <span style="opacity:.65">（A=三项都过关；B=值得人看一眼；C=有硬伤）</span></div>`
+    : "";
+  // 品类校验：只在"没校验"或"有提醒"时出现，正常一致就不占地方
+  const cat = b.category_check;
+  const catLabel = { skincare: "化妆品", oral: "可食用", unknown: "未定" };
+  const catLine = (cat && cat.copy_category && cat.copy_category !== "unknown")
+    ? `<div class="note"${cat.ok ? "" : ' style="color:var(--warn)"'}>
+         品类：文案判为${catLabel[cat.copy_category] || cat.copy_category} · 素材判为${
+           catLabel[cat.image_category] || cat.image_category}（依据：${cat.source}）${
+           (cat.reasons || []).length ? "　" + cat.reasons[0] : ""}</div>`
+    : "";
+  const sem = b.semantic;
+  const semLine = sem
+    ? (sem.checked
+        ? `<div class="note">语义校验：已用 ${sem.model} 判「同一款产品 / 文字乱码 / 比例」</div>`
+        : `<div class="note" style="color:var(--warn)">语义未校验：${sem.reason || "未启用"}　
+             <span style="opacity:.65">（「是不是同一款产品」「文字有没有乱码」目前只能靠人）</span></div>`)
+    : "";
+  const tplName = (TPLS.find(t => t.id === b.template) || {}).name || b.template || "";
+  const tplLine = (b.template && b.template !== "scene")
+    ? `<div class="note">工艺模板：${tplName} v${b.template_version}　导出默认 ${b.template_export}</div>`
+    : "";
+  const head = `
+    <div class="kv">
+      <div><b>${b.candidates.length}</b><span>候选</span></div>
+      <div><b>${cost}</b><span>成本</span></div>
+      <div><b>${b.elapsed_s}s</b><span>耗时</span></div>
+      <div><b>${b.engine}</b><span>引擎</span></div>
+    </div>
+    ${tplLine}
+    ${tierLine}
+    ${catLine}
+    ${semLine}
+    ${b.engine_note ? `<div class="note" style="color:var(--warn)">${b.engine_note}</div>` : ""}
+    ${partial}
+  `;
+
+  const grid = b.candidates.map(c => `
+    <div class="cand ${c.chosen ? "chosen" : ""}" style="${c.review === "rejected" ? "opacity:.45" : ""}">
+      <img src="${c.final_url}" alt="候选 ${c.index}" />
+      <div class="body">
+        <div class="badges">
+          ${verdictBadge(c)}
+          ${c.suggested ? '<span class="badge">推荐</span>' : ""}
+          ${c.chosen ? '<span class="badge ok">已选</span>' : ""}
+          ${c.review === "rejected" ? '<span class="badge warn">已淘汰</span>' : ""}
+          ${semanticBadge(c)}
+          ${layoutBadge(c)}
+          <span class="badge">保真 ${c.scores.fidelity} · 风格 ${c.scores.style} · 质量 ${c.scores.quality}</span>
+        </div>
+        <div class="badges">${scoreLine(c)}</div>
+        ${c.reasons && c.reasons.length ? `<div class="note" style="color:var(--warn)">${c.reasons.join("；")}</div>` : ""}
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="ghost mini" onclick="review('${b.id}', ${c.index}, 'choose')">选中</button>
+          <button class="ghost mini" onclick="review('${b.id}', ${c.index}, 'reject')">淘汰</button>
+          <button class="ghost mini" onclick="review('${b.id}', ${c.index}, 'reset')">复位</button>
+          <a href="${c.final_url}" download>下载</a>
+          <a href="${c.raw_url}" download>原始输出</a>
+        </div>
+      </div>
+    </div>`).join("");
+
+  const prof = b.style_profile;
+  const pack = b.recipe.refs.map(r => `· [${r.role}] ${r.label}`).join("<br>");
+  const chosenCount = b.candidates.filter(c => c.chosen).length;
+
+  $("result").innerHTML = `
+    ${head}
+    <div class="results" style="margin-top:14px">${grid}</div>
+    <div class="exportbar">
+      <span style="color:var(--dim);font-size:12px">已选 ${chosenCount} 张</span>
+      <select id="expSize">
+        <option value="original">原尺寸</option>
+        <option value="square_1080">主图 1080×1080</option>
+        <option value="detail_1080x1440">详情 1080×1440</option>
+        <option value="story_1080x1920">竖版 1080×1920</option>
+        <option value="banner_1920x640">横版 1920×640</option>
+      </select>
+      <button class="primary" onclick="doExport('${b.id}')"
+        ${chosenCount ? "" : "disabled title='先选中至少一张'"}>导出已选</button>
+      <span id="expMsg" style="font-size:12px;color:var(--dim)"></span>
+    </div>
+    <details style="margin-top:16px">
+      <summary style="cursor:pointer;color:var(--dim);font-size:12px">产线细节（参考图打包 / 提示词 / StyleProfile / 素材评分）</summary>
+      <div class="note" style="margin-top:10px"><b>参考图打包</b><br>${pack || "（无）"}</div>
+      <div class="note"><b>提示词</b><pre>${b.recipe.prompt}</pre></div>
+      <div class="note"><b>负向</b><pre>${b.recipe.negative}</pre></div>
+      <div class="note"><b>StyleProfile</b><pre>${JSON.stringify(prof, null, 2)}</pre></div>
+      <div class="note"><b>素材评分</b><pre>${b.materials.map(m => `${m.name}  质量 ${m.quality} / 锐度 ${m.sharpness} / 曝光 ${m.exposure}`).join("\n")}</pre></div>
+    </details>
+  `;
+}
+
+// ─── 审核 ───
+async function review(batchId, index, action) {
+  try {
+    const res = await fetch(`/api/batches/${batchId}/review`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ index, action })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "操作失败");
+    renderBatch(data);
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+// ─── 导出 ───
+async function doExport(batchId) {
+  const msg = $("expMsg");
+  msg.textContent = "导出中…";
+  try {
+    const res = await fetch(`/api/batches/${batchId}/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ size: $("expSize").value })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "导出失败");
+    const links = data.files.map(f =>
+      `<a href="${f.url}" download target="_blank">#${f.index} ${f.size.join("×")}</a>`).join("　");
+    msg.innerHTML = "已导出：" + links;
+  } catch (e) {
+    msg.textContent = e.message;
+  }
+}
+
+// ─── 进度 ───
+function progressHtml(stage, p) {
+  const pct = Math.round(Math.min(1, Math.max(0, p)) * 100);
+  return `<div class="progressbox">
+    <div style="font-size:13px;margin-bottom:8px">${stage || "处理中"} <span style="color:var(--dim)">${pct}%</span></div>
+    <div style="height:6px;background:#e9e9ef;border-radius:3px;overflow:hidden">
+      <div style="height:100%;width:${pct}%;background:var(--ok,#2f9e63);transition:width .4s"></div>
+    </div>
+  </div>`;
+}
+
+async function pollJob(id) {
+  const box = $("result");
+  for (let i = 0; i < 400; i++) {
+    let j;
+    try {
+      j = await (await fetch(`/api/batches/${id}`)).json();
+    } catch (e) {
+      box.innerHTML = `<div class="empty" style="color:var(--bad)">与服务器断开：${e.message}</div>`;
+      return null;
+    }
+    if (j.candidates && j.candidates.length) { renderBatch(j); return j; }
+
+    const st = j.job ? j.job.status : j.status;
+    const stage = j.job ? j.job.stage : j.stage;
+    const prog = j.job ? j.job.progress : j.progress;
+    box.innerHTML = progressHtml(stage, prog || 0);
+
+    if (st === "failed") {
+      const err = (j.job && j.job.error) || j.error || "未知错误";
+      box.innerHTML = `<div class="empty" style="color:var(--bad)">生成失败：${err}</div>`;
+      return null;
+    }
+    await new Promise(r => setTimeout(r, 600));
+  }
+  box.innerHTML = '<div class="empty" style="color:var(--warn)">等待超时，请到「历史」里查看结果</div>';
+  return null;
+}
+
+$("btnRun").onclick = async () => {
+  if (!state.materials.length) { alert("先放至少一张素材图"); return; }
+  const btn = $("btnRun");
+  btn.disabled = true;
+  btn.textContent = "生成中…";
+  $("result").innerHTML = progressHtml("提交任务", 0.01);
+  try {
+    const res = await fetch("/api/batches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        instruction: $("instruction").value,
+        engine: $("engine").value || null,
+        candidates: Number($("cands").value),
+        template: $("template").value || "scene",
+        category: $("category").value || "auto",
+        copy: currentCopy(),
+        materials: state.materials,
+        exemplars: state.exemplars
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "生成失败");
+    await pollJob(data.id);
+  } catch (e) {
+    $("result").innerHTML = `<div class="empty" style="color:var(--bad)">${e.message}</div>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "生成成品";
+  }
+};
+
+// ─── 工艺模板 ───
+let TPLS = [];
+
+function currentTpl() {
+  return TPLS.find(t => t.id === ($("template").value || "scene")) || TPLS[0] || null;
+}
+
+function currentCopy() {
+  const t = currentTpl();
+  if (!t || !(t.copy_fields || []).length) return null;
+  const points = $("cpPoints").value
+    .split("\n").map(s => s.trim()).filter(Boolean).slice(0, 3);
+  return {
+    title: $("cpTitle").value.trim(),
+    subtitle: $("cpSub").value.trim(),
+    points,
+    tag: $("cpTag").value.trim()
+  };
+}
+
+function syncTplUi() {
+  const t = currentTpl();
+  if (!t) return;
+  $("tplDesc").textContent =
+    `${t.desc}　画布 ${t.canvas ? t.canvas.join("×") : "原尺寸"}，导出 ${t.export}`;
+  $("copyBox").style.display = (t.copy_fields || []).length ? "block" : "none";
+}
+
+async function loadTemplates() {
+  const r = await (await fetch("/api/templates")).json();
+  TPLS = r.templates || [];
+  const sel = $("template");
+  sel.innerHTML = TPLS.map(t => `<option value="${t.id}">${t.name}</option>`).join("");
+  sel.onchange = syncTplUi;
+  syncTplUi();
+}
+
+loadConfig();
+loadTemplates();
+</script>
+</body>
+</html>
