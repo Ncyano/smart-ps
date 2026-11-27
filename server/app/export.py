@@ -28,6 +28,7 @@ from PIL import Image, ImageDraw
 
 from .config import DATA_DIR
 from . import gate as gatemod
+from . import record as recordmod
 from . import rights as rightsmod
 
 EXPORT_DIR = DATA_DIR / "exports"
@@ -179,6 +180,7 @@ def _readme(manifest: dict) -> str:
         f"- 规格：{manifest['size']}",
         f"- 导出类型：{'正式交付' if manifest['formal'] else '内部参考 / 待人工'}",
         f"- 素材授权：{manifest['rights']['label']}（{manifest['rights']['declared']}）",
+        "- 逐张制作记录：`record.json`（机读）/ `记录.md`（人读）",
         "",
         "| # | 文件 | 交付状态 | 卡在哪一项 |",
         "|---|---|---|---|",
@@ -286,6 +288,25 @@ def export_batch(batch: dict, indexes: list[int], size: str | None = None,
                 "delivery": (c.get("delivery") or {}).get("status"),
             }
         )
+
+    # 逐张制作记录：客户问"这张怎么来的"时不用靠回忆。
+    # 放在清单之前生成，因为清单里要引用它的文件名。
+    recs = []
+    now = datetime.now().isoformat(timespec="seconds")
+    by_index = {c["index"]: c for c in picked}
+    for r in results:
+        if r.get("error"):
+            continue
+        c = by_index.get(r["index"])
+        if c is None:
+            continue
+        recs.append(recordmod.build(
+            batch, c,
+            export={"file": r["file"], "spec": size or "original", "size": r["size"],
+                    "fmt": fmt, "formal": formal, "at": now},
+        ))
+    if recs:
+        recordmod.write(out_dir, recs)
 
     # 人读 + 机读两份清单
     manifest = _manifest(batch, results, gate_result, formal, size or "original")

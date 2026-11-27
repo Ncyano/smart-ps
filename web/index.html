@@ -91,6 +91,12 @@
   .chk-i.ok{color:var(--ok)} .chk-i.warn{color:var(--warn)} .chk-i.bad{color:var(--bad)}
   .chk-l{color:var(--text)} .chk-d{color:var(--dim)}
   .badge.bad{color:var(--bad);border-color:rgba(239,91,91,.4)}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+  .chip{font-size:12px;padding:4px 9px;border-radius:99px;cursor:pointer;
+    border:1px solid var(--line);background:transparent;color:var(--dim)}
+  .chip.on{background:rgba(239,91,91,.16);border-color:rgba(239,91,91,.5);color:var(--text)}
+  .zoneline{font-size:12px;color:var(--dim);margin-top:6px;line-height:1.7}
+  .zoneline b{color:var(--text);font-weight:600}
 </style>
 </head>
 <body>
@@ -373,6 +379,107 @@ function sourcesBlock(b) {
     ${rows}${warn}</details>`;
 }
 
+// 一次审核意见 = 若干问题类型 + 一个处理方式。类型决定"该修哪一层"，
+// 所以下面会顺带调一次 /redo（只出方案，不动手）。
+function feedbackBlock(b, c) {
+  const id = `${b.id}-${c.index}`;
+  const chips = Object.entries(ISSUES).map(([k, v]) =>
+    `<button type="button" class="chip" data-i="${k}" title="${esc(v.hint || "")}"
+       onclick="this.classList.toggle('on')">${esc(v.label)}</button>`
+  ).join("");
+  return `<details class="chkbox">
+    <summary>问题反馈（选类型 → 先告诉你哪些能本地修、哪些要重生成）</summary>
+    <div class="chips" id="fb-${id}">${chips}</div>
+    <div class="row" style="margin-top:8px;gap:6px">
+      <select id="fbd-${id}">
+        <option value="rejected">弃用</option>
+        <option value="deferred">挂起待定</option>
+        <option value="accepted">带问题接受（须写原因）</option>
+      </select>
+      <input id="fbn-${id}" placeholder="说明，例：瓶身「轻透」被改成「轻秀」" style="flex:1" />
+      <button class="ghost mini" type="button" onclick="sendFeedback('${b.id}',${c.index})">记录并出方案</button>
+    </div>
+    <div class="note" id="fbr-${id}"></div>
+  </details>`;
+}
+
+async function sendFeedback(batchId, index) {
+  const id = `${batchId}-${index}`;
+  const box = $(`fb-${id}`);
+  const picked = [...box.querySelectorAll(".chip.on")].map(el => el.dataset.i);
+  const out = $(`fbr-${id}`);
+  if (!picked.length) { out.innerHTML = '<span style="color:var(--warn)">先点选问题类型</span>'; return; }
+  const note = $(`fbn-${id}`).value.trim();
+  out.textContent = "正在记录…";
+  try {
+    const r1 = await fetch(`/api/batches/${batchId}/feedback`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ index, issues: picked, disposition: $(`fbd-${id}`).value,
+                             note, reviewer: "界面" })
+    });
+    const d1 = await r1.json();
+    if (!r1.ok) throw new Error(d1.error || "记录失败");
+    renderBatch(d1.batch);
+
+    const r2 = await fetch(`/api/batches/${batchId}/redo`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ index, issues: picked, plan_only: true })
+    });
+    const plan = await r2.json();
+    const box2 = $(`fbr-${id}`);
+    if (!box2) return;   // 重渲染后旧节点没了，方案写进新的
+    // 重渲染会把 details 收起来；不重新展开，用户看不到方案，会以为没反应
+    const det = box2.closest("details");
+    if (det) det.open = true;
+    const local = (plan.steps || []).filter(s => s.local);
+    const remote = (plan.steps || []).filter(s => !s.local);
+    const lines = [];
+    if (local.length) lines.push(`本地可修（0 元）：${local.map(s => s.label).join("、")}`);
+    if (remote.length) lines.push(`需要重生成：${remote.map(s => `${s.label}（${s.cost}）`).join("、")}`);
+    box2.innerHTML = lines.join("<br>");
+    if (local.length) {
+      const btn = document.createElement("button");
+      btn.className = "ghost mini";
+      btn.textContent = "本地重做";
+      btn.onclick = () => redoNow(batchId, index, picked);
+      box2.appendChild(document.createElement("br"));
+      box2.appendChild(btn);
+    }
+    box2.scrollIntoView({block: "nearest"});
+  } catch (e) {
+    out.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`;
+  }
+}
+
+async function redoNow(batchId, index, issues) {
+  try {
+    const r = await fetch(`/api/batches/${batchId}/redo`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ index, issues, reviewer: "界面" })
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || "重做失败");
+    renderBatch(d.batch);
+  } catch (e) {
+    alert(e.message);
+  }
+}
+
+function taskLine(b) {
+  const t = b.task;
+  if (!t) return `<div class="note" style="color:var(--warn)">这批没有任务单（老批次）：需求完整性未校验，闸门会挂待人工。</div>`;
+  const z = t.zones || {};
+  const block = (t.unresolved || []).filter(u => u.severity === "block");
+  return `<div class="zoneline">
+    <b>物料</b>　${esc(t.kind_label || t.kind)}　　<b>渠道</b>　${esc(t.channel || "—")}　　
+    <b>验收</b>　${(t.acceptance || []).length} 条
+    <br><b>保护区</b>：${esc((z.keep || []).join("；"))}
+    <br><b>生成区</b>：${esc((z.may_change || []).join("；"))}
+    <br><b>禁止</b>：${esc((z.forbid || []).join("；"))}
+    ${block.length ? `<br><span style="color:var(--bad)">待补：${block.map(u => esc(u.field + "：" + u.why)).join("；")}</span>` : ""}
+  </div>`;
+}
+
 function renderBatch(b) {
   const cost = b.cost_cny > 0 ? `${b.cost_cny.toFixed(2)} 元` : "0 元（本地/合成）";
   const produced = b.produced ?? b.candidates.length;
@@ -424,7 +531,7 @@ function renderBatch(b) {
       <div><b>${b.elapsed_s}s</b><span>耗时</span></div>
       <div><b>${esc(b.engine)}</b><span>引擎</span></div>
     </div>
-    ${tplLine}${dvLine}${catLine}${rightsLine}${semLine}
+    ${tplLine}${taskLine(b)}${dvLine}${catLine}${rightsLine}${semLine}
     ${b.engine_note ? `<div class="note" style="color:var(--warn)">${esc(b.engine_note)}</div>` : ""}
     ${partial}`;
 
@@ -441,12 +548,15 @@ function renderBatch(b) {
           ${c.chosen ? '<span class="badge ok">已选</span>' : ""}
           ${c.review === "rejected" ? '<span class="badge warn">已淘汰</span>' : ""}
           ${c.subject_confirmed ? '<span class="badge ok">已核对</span>' : ""}
+          ${(c.versions || []).length ? `<span class="badge">v${(c.versions || []).length + 1}</span>` : ""}
+          ${(c.open_issues || []).length ? `<span class="badge warn">${c.open_issues.length} 个待修问题</span>` : ""}
           ${semanticBadge(c)}
           ${layoutBadge(c)}
         </div>
         <div class="badges">${scoreLine(c)}</div>
         ${(c.reasons && c.reasons.length) ? `<div class="note" style="color:var(--warn)">${esc(c.reasons.join("；"))}</div>` : ""}
         ${checksBlock(c)}
+        ${feedbackBlock(b, c)}
         <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
           ${canConfirm ? `<button class="ghost mini" onclick="review('${b.id}', ${c.index}, '${c.subject_confirmed ? "unconfirm" : "confirm"}')">
             ${c.subject_confirmed ? "取消核对" : "内容已核对"}</button>` : ""}
@@ -626,6 +736,7 @@ $("btnRun").onclick = async () => {
 // ─── 工艺模板 ───
 let TPLS = [];
 let TAX = [];
+let ISSUES = {};      // 问题类型 → {label, hint, fix}，来自 /api/feedback
 const state2 = { extra: {}, corners: null, sceneUrl: "", sceneSize: null };
 
 const FIELD_LABEL = {
@@ -858,6 +969,13 @@ async function loadTemplates() {
   syncTplUi();
 }
 
+async function loadIssues() {
+  try {
+    const r = await (await fetch("/api/feedback")).json();
+    ISSUES = r.issues || {};
+  } catch (e) { /* 拿不到就让反馈块空着，不影响出图 */ }
+}
+
 async function loadTaxonomy() {
   try {
     const r = await (await fetch("/api/taxonomy")).json();
@@ -871,6 +989,7 @@ async function loadTaxonomy() {
 loadConfig();
 loadTemplates();
 loadTaxonomy();
+loadIssues();
 </script>
 </body>
 </html>

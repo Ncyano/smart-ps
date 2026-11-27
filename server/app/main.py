@@ -19,6 +19,8 @@ from PIL import Image
 from . import config as cfgmod
 from . import gate
 from . import jobs
+from . import redo
+from . import review
 from . import rights
 from . import scenes
 from . import store
@@ -94,6 +96,13 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/taxonomy":
             return self._json(taxonomy.load().to_dict())
+
+        if path == "/api/feedback":
+            # 反馈统计：下次该改哪里，看这里而不是凭印象
+            return self._json({"stats": review.stats(),
+                               "suggestions": review.suggestions(),
+                               "issues": review.ISSUES,
+                               "dispositions": review.DISPOSITIONS})
 
         if path == "/api/batches":
             return self._json({"batches": jobs.list_recent()})
@@ -196,6 +205,52 @@ class Handler(BaseHTTPRequestHandler):
 
             if len(parts) == 2 and parts[1] == "export":
                 return self._export(batch, payload)
+
+            # 结构化审核意见：问题类型 + 处理方式，落日志可统计
+            if len(parts) == 2 and parts[1] == "feedback":
+                try:
+                    index = int(payload.get("index"))
+                except (TypeError, ValueError):
+                    return self._err("index 必须是整数", 422)
+                try:
+                    entry = review.record(
+                        batch, index,
+                        payload.get("issues") or [],
+                        disposition=str(payload.get("disposition") or "rejected"),
+                        note=str(payload.get("note") or ""),
+                        reviewer=str(payload.get("reviewer") or payload.get("by") or "审核人"),
+                    )
+                except ValueError as exc:
+                    return self._err(str(exc), 422)
+                gate.apply(batch)
+                store.save_batch(batch)
+                return self._json({"ok": True, "entry": entry, "batch": batch})
+
+            # 定向重做：先出方案（要不要花钱），再执行本地能修的那部分
+            if len(parts) == 2 and parts[1] == "redo":
+                try:
+                    index = int(payload.get("index"))
+                except (TypeError, ValueError):
+                    return self._err("index 必须是整数", 422)
+                issues = payload.get("issues") or []
+                if payload.get("plan_only"):
+                    return self._json(redo.plan(batch, index, issues))
+                corners = payload.get("corners")
+                try:
+                    out = redo.local_redo(
+                        batch, index, issues,
+                        copy=payload.get("copy") or None,
+                        corners=[list(p) for p in corners] if corners else None,
+                        reviewer=str(payload.get("reviewer") or payload.get("by") or "审核人"),
+                    )
+                except ValueError as exc:
+                    return self._err(str(exc), 422)
+                except Exception as exc:  # noqa: BLE001
+                    traceback.print_exc()
+                    return self._err(f"重做失败：{exc}", 500)
+                return self._json({"batch": out["batch"], "steps": out["steps"],
+                                   "entry": out["entry"], "needs_model": out["needs_model"],
+                                   "resubmit": out["resubmit"]})
 
             # 手动重试：有检查点就续跑，不重复付费
             if len(parts) == 2 and parts[1] == "retry":

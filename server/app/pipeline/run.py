@@ -34,8 +34,10 @@ from PIL import Image
 
 from .. import claims as claimsmod
 from .. import gate
+from .. import region as regionmod
 from .. import rights as rightsmod
 from .. import store
+from .. import task as taskmod
 from .. import templates
 from ..config import load
 from ..engines import registry
@@ -204,6 +206,17 @@ def run_batch(req, cfg: dict | None = None, batch_id: str | None = None, on_prog
     st["template"] = tpl.id
     st["copy"] = copy
 
+    # ── ⓪ 需求结构化：把自然语言整理成一张可核对的单子 ──
+    # 这一步不省：单子里写明了"哪些必须保持、哪些允许改、什么算做完"，
+    # 后面提示词、闸门、制作记录都从这里取，避免三处口径不一致。
+    if "task" not in st:
+        st["task"] = taskmod.build(
+            req, tpl,
+            materials=[m.name for m in (getattr(req, "materials", None) or [])],
+            exemplars=[e.name for e in (getattr(req, "exemplars", None) or [])],
+        )
+    task_spec = st["task"]
+
     # ── 落盘原始输入（恢复时跳过） ──
     if "materials" not in st:
         tick("正在保存素材", 0.05)
@@ -241,6 +254,10 @@ def run_batch(req, cfg: dict | None = None, batch_id: str | None = None, on_prog
         tick("正在组装参考图与提示词", 0.24)
         refs, ref_notes = packmod.pack_refs(scored, exemplars, profile)
         prompt, negative = packmod.build_prompt(req.instruction, profile)
+        # 三类区域翻译成约束段：只写"高级感"时模型不知道哪里不许动，
+        # 会顺手把包装上的字重画一遍。
+        if task_spec.get("prompt_block"):
+            prompt = prompt + "\n" + task_spec["prompt_block"]
         if tpl.prompt_extra:
             prompt = prompt + "\n" + "\n".join(tpl.prompt_extra)
         if tpl.negative_extra:
@@ -361,7 +378,10 @@ def run_batch(req, cfg: dict | None = None, batch_id: str | None = None, on_prog
 
     finals: list[tuple[Path, Image.Image]] = []
     layouts: list[dict | None] = []
+    regions: list[dict] = []
     for i, base_im in enumerate(bases):
+        # 分区核查要在**排版之前**量：排完版，带子里最密的细节就是文字自己
+        regions.append(regionmod.inspect(base_im, task_spec.get("zones") or {}))
         final, lr = base_im, None
         if tpl.apply is not None:
             final, lr = tpl.apply(final, copy, ctx)
@@ -452,6 +472,7 @@ def run_batch(req, cfg: dict | None = None, batch_id: str | None = None, on_prog
                 "match_box": audit.get("match_box"),
                 "semantic": jr.to_dict(),
                 "layout": lr,
+                "regions": regions[i] if i < len(regions) else None,
                 "total": round(total, 3),
                 # suggested = 算法推荐；chosen = 人工选定。两者不要混
                 "suggested": False,
@@ -479,6 +500,8 @@ def run_batch(req, cfg: dict | None = None, batch_id: str | None = None, on_prog
         "template_export": tpl.export,
         "template_compose": tpl.compose,
         "copy": copy,
+        # 需求单：物料类型/三类区域/验收条件/待确认项，闸门与制作记录都读它
+        "task": task_spec,
         "category_check": cat_check,
         "claims_audit": claims_audit,
         # 素材授权：决定这批图能不能标"可正式交付"。声明了第三方/示例就只算内部参考

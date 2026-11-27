@@ -102,9 +102,15 @@ python scripts/kb_search.py --list
 **交付闸门**（逐项判定，分数不能抵消）、
 **合规与数据来源**（绝对化/疗效/商标硬拦截，数字要绑来源）、
 **授权与示例闸门**（内部参考强制留痕 + 水印预览）、
-**按模板验收集**（`verify/report.md`）。
+**按模板验收集**（`verify/report.md`）、
+**需求任务单 + 三类区域**（保护区/生成区/排版区，写进提示词与闸门）、
+**审核反馈闭环**（10 类问题 → 修法路由，日志可统计）、
+**定向重做**（文案/数据/主体/贴屏本地 0 元修，写新版本不覆盖）、
+**逐张制作记录**（`record.json` + `记录.md`）、
+**配对台账**（`verify/配对台账.md`：12 可配对 / 21 待确认）、
+**模型对照评测脚本**（默认只出计划，未真跑）。
 
-未做：局部重做单张、改文案、权限、试点部署。
+未做：权限、试点部署、模型对照实跑（要用额度，等确认）。
 详细施工顺序见 `搭建步骤.md`。
 
 ## 关键文件
@@ -117,6 +123,11 @@ python scripts/kb_search.py --list
 | `server/app/taxonomy.py` | ★ 品类/物料注册表（读 config/taxonomy.toml） |
 | `server/app/scenes.py` | ★ 场景四角检测、置信度、校准存档 |
 | `server/app/rights.py` | 授权五级 → 三级交付范围 |
+| `server/app/task.py` | ★ 需求 → 任务单（三区 / 验收条件 / 待确认项） |
+| `server/app/review.py` | ★ 反馈闭环：问题类型 → 修法，落 log.jsonl |
+| `server/app/redo.py` | ★ 定向重做：本地 0 元先修，修不了才回引擎 |
+| `server/app/record.py` | ★ 逐张制作记录（七块，导出时写） |
+| `server/app/region.py` | 分区事后核查（只提示，不进闸门） |
 | `server/app/templates/builtin.py` | 生成类模板（scene/white_bg/kv） |
 | `server/app/templates/extra.py` | 合成类模板（pair/price/patent/table/screen） |
 | `server/app/export.py` | 导出 + manifest + 水印预览 + 正式闸门 |
@@ -128,6 +139,20 @@ python scripts/kb_search.py --list
 | `verify/report.md` | 按模板验收集报告（每次跑更新） |
 | `产出/需求样张/_screen_kv.py` | KV 排版 + 透视贴屏（融合参数全在这） |
 | `项目方案.md` | 立项方案（对外） |
+
+## 常用命令
+
+```bash
+.\run.ps1                                        # 启动服务（8765）
+python scripts/smoke_test.py                     # 离线自检（含闸门明细）
+python scripts/verify_templates.py               # 按模板验收集（15 例，含反例）
+python scripts/test_gate.py                      # 闸门/合规/品类（46 条）
+python scripts/test_feedback.py                  # 任务单/分区/反馈/重做/记录（56 条）
+python scripts/test_recovery.py                  # 检查点续跑 + 幂等（17 条）
+python scripts/bench_fidelity.py                 # 保真鉴别力标定
+python scripts/build_pairing.py                  # 交付↔素材↔参考 配对台账
+python scripts/bench_models.py                   # 模型对照：默认只出计划，--run 才花钱
+```
 
 ## 写文档的地方
 
@@ -142,4 +167,5 @@ python scripts/kb_search.py --list
    相似度还有 0.85。整体清晰度项也兜不住（只占主体 1/4）。见 `knowledge/07-待决事项.md` §3
 2. 细微比例改动（10–30%）没有任何手段能自动发现——`spread` 抓不到、
    视觉模型看不出还说"把握 98"。见 `knowledge/07-待决事项.md` §2
-3. 13 类新需求缺三类素材（院线 / 真人前后 / 门店价格）
+3. 素材池只有 11 张，覆盖不了大屏 / 表格 / 尺码 / 文案对比海报——
+   配对台账 21 张待确认，缺素材的类别做不了固定评测基准

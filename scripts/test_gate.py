@@ -43,6 +43,15 @@ def base_batch(**kw) -> dict:
         "category_check": {"ok": True, "status": "skipped", "source": "文案未指向具体品类",
                            "copy_category": "unknown", "image_category": "unknown"},
         "claims_audit": {"status": "pass", "findings": [], "data_items": [], "missing_fields": []},
+        # 任务单：真实批次一定带这个（run.py ⓪ 生成）。缺了闸门判 unknown——
+        # 没校验过不等于通过，这条在【8】里单独测。
+        "task": {
+            "kind": "scene", "kind_label": "场景图",
+            "template": {"id": "scene", "version": 1},
+            "zones": {"keep": ["产品外形"], "may_change": ["背景"], "forbid": ["改包装字"]},
+            "acceptance": [{"id": "rights", "label": "授权", "auto": True, "how": ""}],
+            "unresolved": [],
+        },
         "candidates": [{
             "index": 1, "total": 0.95, "tier": "A",
             "scores": {"structure": 0.93, "spread": 0.02, "sharp": 1.0},
@@ -217,6 +226,22 @@ def main() -> int:
     res = cat.check({"title": "每天一粒"}, img, {"engines": {}}, template="kv")
     check("无声明且无模型 → unchecked + 原因",
           res.status == "unchecked" and bool(res.unchecked_reason), res.unchecked_reason)
+
+    print("\n【8】闸门：需求完整度（任务单缺失 / 缺项）")
+    b = base_batch()
+    b.pop("task")
+    d = G.evaluate(b, b["candidates"][0])
+    check("没有任务单 → 待人工（不是通过）", d.status == G.MANUAL and "需求" in d.reason, d.reason[:60])
+    b = base_batch(task={"kind": "kv", "unresolved": [
+        {"field": "copy", "why": "这类物料必须有文案", "severity": "block"}],
+        "acceptance": []})
+    d = G.evaluate(b, b["candidates"][0])
+    check("任务单缺 block 项 → rejected", d.status == G.REJECTED, d.reason[:60])
+    b = base_batch(task={"kind": "scene", "unresolved": [
+        {"field": "exemplars", "why": "没有参考图", "severity": "note"}],
+        "acceptance": [{"id": "rights", "label": "授权", "auto": True, "how": ""}]})
+    d = G.evaluate(b, b["candidates"][0])
+    check("只有 note → 仍可交付（note 不降级）", d.status == G.DELIVERABLE, d.reason[:60])
 
     print(f"\n{'=' * 56}\n通过 {PASS}　失败 {FAIL}")
     return 0 if FAIL == 0 else 1

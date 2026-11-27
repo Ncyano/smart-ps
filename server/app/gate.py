@@ -47,6 +47,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 
 from . import rights as rightsmod
+from . import task as taskmod
 
 PASS, WARN, UNKNOWN, FAIL, SKIP = "pass", "warn", "unknown", "fail", "skip"
 
@@ -113,6 +114,22 @@ def _rights_check(batch: dict) -> Check:
                    action="换自有素材，或取得书面授权后重新声明为 licensed")
     return _mk("rights", "素材授权", UNKNOWN, "未声明素材来源与授权状态", hard=True,
                action="在批次里补声明 owned / licensed / third_party / sample")
+
+
+def _task_check(batch: dict) -> Check:
+    """需求本身完不完整。缺需求就出图，等于让模型替客户做决定。"""
+    r = taskmod.check(batch.get("task") or {})
+    st = r["status"]
+    if st == "fail":
+        return _mk("task", "需求完整度", FAIL, r["detail"], hard=True,
+                   action="补齐任务单里标 block 的项（目标描述、文案、必填数据）")
+    if st == "warn":
+        return _mk("task", "需求完整度", WARN, r["detail"], hard=True,
+                   action="确认这些缺省是否可接受（不补也能出图，但结论会挂待人工）")
+    if st == "pass":
+        return _mk("task", "需求完整度", PASS, r["detail"], hard=True)
+    return _mk("task", "需求完整度", UNKNOWN, r["detail"], hard=True,
+               action="老批次没有任务单：重新提交一次即可生成")
 
 
 def _claims_check(batch: dict) -> list[Check]:
@@ -270,7 +287,7 @@ def _confirm_check(batch: dict, cand: dict) -> Check:
 
 def evaluate(batch: dict, cand: dict) -> Delivery:
     """对一张候选做逐项判定。不做加权、不做抵消。"""
-    checks: list[Check] = [_rights_check(batch), _category_check(batch)]
+    checks: list[Check] = [_rights_check(batch), _task_check(batch), _category_check(batch)]
     checks.extend(_claims_check(batch))
     checks.extend(_fidelity_checks(cand))
     checks.append(_layout_check(cand))

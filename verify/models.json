@@ -1,0 +1,189 @@
+{
+  "models": [
+    "doubao-seedream-5-0-flash-260915",
+    "doubao-seedream-5-0-pro"
+  ],
+  "cases": [
+    "white_bg",
+    "kv",
+    "scene",
+    "person"
+  ],
+  "n": 1,
+  "ran": true,
+  "blocked": "",
+  "results": {
+    "doubao-seedream-5-0-flash-260915": {
+      "rows": [
+        {
+          "model": "doubao-seedream-5-0-flash-260915",
+          "case": "white_bg",
+          "cost_cny": 0.12,
+          "elapsed_s": 15.6,
+          "images": [
+            {
+              "structure": 0.544,
+              "spread": 0.014,
+              "sharp": 0.973,
+              "tier": "B",
+              "label": "pass",
+              "label_score": 0.741,
+              "subject": "warn",
+              "usable": false,
+              "file": "cand_1.png",
+              "path": "C:\\Users\\Administrator\\Desktop\\Smart-ps\\data\\bench_models\\doubao-seedream-5-0-flash-260915\\white_bg\\cand_1.png"
+            }
+          ],
+          "tier": null,
+          "raw_meta": {
+            "model": "doubao-seedream-5-0-flash-260915",
+            "usage": {
+              "input_images": 1,
+              "generated_images": 1,
+              "output_tokens": 16428,
+              "total_tokens": 16428
+            }
+          }
+        },
+        {
+          "model": "doubao-seedream-5-0-flash-260915",
+          "case": "kv",
+          "cost_cny": 0.12,
+          "elapsed_s": 14.1,
+          "images": [
+            {
+              "structure": 0.624,
+              "spread": 0.157,
+              "sharp": 1.339,
+              "tier": "B",
+              "label": "pass",
+              "label_score": 0.843,
+              "subject": "warn",
+              "usable": false,
+              "file": "cand_1.png",
+              "path": "C:\\Users\\Administrator\\Desktop\\Smart-ps\\data\\bench_models\\doubao-seedream-5-0-flash-260915\\kv\\cand_1.png"
+            }
+          ],
+          "tier": null,
+          "raw_meta": {
+            "model": "doubao-seedream-5-0-flash-260915",
+            "usage": {
+              "input_images": 1,
+              "generated_images": 1,
+              "output_tokens": 16428,
+              "total_tokens": 16428
+            }
+          }
+        },
+        {
+          "model": "doubao-seedream-5-0-flash-260915",
+          "case": "scene",
+          "cost_cny": 0.12,
+          "elapsed_s": 14.0,
+          "images": [
+            {
+              "structure": 0.784,
+              "spread": 0.071,
+              "sharp": 1.636,
+              "tier": "A",
+              "label": "pass",
+              "label_score": 0.859,
+              "subject": "pass",
+              "usable": true,
+              "file": "cand_1.png",
+              "path": "C:\\Users\\Administrator\\Desktop\\Smart-ps\\data\\bench_models\\doubao-seedream-5-0-flash-260915\\scene\\cand_1.png"
+            }
+          ],
+          "tier": null,
+          "raw_meta": {
+            "model": "doubao-seedream-5-0-flash-260915",
+            "usage": {
+              "input_images": 1,
+              "generated_images": 1,
+              "output_tokens": 16428,
+              "total_tokens": 16428
+            }
+          }
+        },
+        {
+          "model": "doubao-seedream-5-0-flash-260915",
+          "case": "person",
+          "cost_cny": 0.12,
+          "elapsed_s": 14.3,
+          "images": [
+            {
+              "structure": 0.976,
+              "spread": null,
+              "sharp": null,
+              "tier": "B",
+              "label": "unknown",
+              "label_score": null,
+              "subject": "unknown",
+              "usable": false,
+              "file": "cand_1.png",
+              "path": "C:\\Users\\Administrator\\Desktop\\Smart-ps\\data\\bench_models\\doubao-seedream-5-0-flash-260915\\person\\cand_1.png"
+            }
+          ],
+          "tier": null,
+          "raw_meta": {
+            "model": "doubao-seedream-5-0-flash-260915",
+            "usage": {
+              "input_images": 1,
+              "generated_images": 1,
+              "output_tokens": 16428,
+              "total_tokens": 16428
+            }
+          }
+        }
+      ],
+      "summary": {
+        "请求": 4,
+        "产出": 4,
+        "一次可用": 1,
+        "一次可用率": 0.25,
+        "总成本": 0.48,
+        "单张可用成本": 0.48,
+        "平均耗时": 14.5,
+        "失败": 0
+      }
+    },
+    "doubao-seedream-5-0-pro": {
+      "rows": [
+        {
+          "case": "white_bg",
+          "error": "HTTP 404：{\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint doubao-seedream-5-0-pro does not exist or you do not have access to it. Request id: 0217957503653084f644a6b4f65cd7c798419da60872531629ace\",\"param\":\"\",\"type\":\"Not Found\"}}",
+          "images": [],
+          "model": "doubao-seedream-5-0-pro"
+        },
+        {
+          "case": "kv",
+          "error": "HTTP 404：{\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint doubao-seedream-5-0-pro does not exist or you do not have access to it. Request id: 02179575036549041f89ff67558dec75454d97963e9341b71c129\",\"param\":\"\",\"type\":\"Not Found\"}}",
+          "images": [],
+          "model": "doubao-seedream-5-0-pro"
+        },
+        {
+          "case": "scene",
+          "error": "HTTP 404：{\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint doubao-seedream-5-0-pro does not exist or you do not have access to it. Request id: 021795750365655af71e85a49ed90f7564e7e8026279fe7d56fcd\",\"param\":\"\",\"type\":\"Not Found\"}}",
+          "images": [],
+          "model": "doubao-seedream-5-0-pro"
+        },
+        {
+          "case": "person",
+          "error": "HTTP 404：{\"error\":{\"code\":\"InvalidEndpointOrModel.NotFound\",\"message\":\"The model or endpoint doubao-seedream-5-0-pro does not exist or you do not have access to it. Request id: 021795750365822746abb8ea69ccb3d7a75bd7d82f8063ffd66b6\",\"param\":\"\",\"type\":\"Not Found\"}}",
+          "images": [],
+          "model": "doubao-seedream-5-0-pro"
+        }
+      ],
+      "summary": {
+        "请求": 4,
+        "产出": 0,
+        "一次可用": 0,
+        "一次可用率": 0.0,
+        "总成本": 0,
+        "单张可用成本": null,
+        "平均耗时": 0.0,
+        "失败": 4
+      }
+    }
+  }
+}
