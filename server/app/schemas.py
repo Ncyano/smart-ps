@@ -26,6 +26,9 @@ class BatchRequest(BaseModel):
     # 产品品类：auto（默认，靠词表 + 视觉模型判）/ skincare / oral。
     # 显式声明最可靠，还能省掉一次模型调用。用于拦截"气垫霜配每天一粒"这类串台。
     category: str = "auto"
+    # 素材授权：owned 自有 / licensed 已授权 / third_party 第三方未授权 /
+    # sample 示例 / unknown 未声明（默认）。决定能否标"可正式交付"，见 rights.py
+    rights: str = "unknown"
 
 
 class ConfigPatch(BaseModel):

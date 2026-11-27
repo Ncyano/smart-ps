@@ -14,6 +14,7 @@ from PIL import Image
 
 from .config import DATA_DIR
 from . import store
+from . import rights as rightsmod
 
 EXPORT_DIR = DATA_DIR / "exports"
 
@@ -76,6 +77,14 @@ def export_batch(batch: dict, indexes: list[int], size: str | None = None,
     out_dir = EXPORT_DIR / batch["id"]
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # ── 授权闸门：声明了"第三方未授权 / 示例"就在导出目录留一份说明 ──
+    # 不硬拦（拦了也会被随手改声明绕过），但文件夹转给谁都能看到这行字。
+    gate = rightsmod.gate(batch)
+    if gate["internal_only"]:
+        (out_dir / rightsmod.EXPORT_NOTICE).write_text(
+            rightsmod.notice_text(batch, rightsmod.for_batch(batch)), encoding="utf-8"
+        )
+
     results: list[dict] = []
     for c in picked:
         src = DATA_DIR / c["final_url"].lstrip("/").removeprefix("files/")
@@ -117,6 +126,7 @@ def export_batch(batch: dict, indexes: list[int], size: str | None = None,
         {
             "at": datetime.now().isoformat(timespec="seconds"),
             "size": size or "original",
+            "rights": gate,          # 导出的每一条都带授权状态，便于事后追溯
             "files": results,
         }
     )

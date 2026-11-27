@@ -24,6 +24,7 @@ from . import steps
 from . import fidelity as fid
 from . import judge
 from . import category
+from .. import rights as rightsmod
 
 
 def _fan_out(engine, gen_req: GenRequest, out_dir: Path, n: int, retries: int = 1) -> dict:
@@ -285,6 +286,8 @@ def run_batch(req, cfg: dict | None = None, batch_id: str | None = None, on_prog
         "template_export": tpl.export,
         "copy": copy,
         "category_check": cat_check.to_dict(),
+        # 素材授权：决定这批图能不能标"可正式交付"。声明了第三方/示例就只算内部参考
+        "rights": rightsmod.resolve(getattr(req, "rights", "unknown")).to_dict(),
         "semantic": {
             "checked": bool(judge_ok),
             "model": (semantics[0].model if semantics else ""),

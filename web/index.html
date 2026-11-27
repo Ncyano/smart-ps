@@ -119,6 +119,16 @@
     </select>
     <div class="note">文案说「每天一粒」、产品却是气垫霜时，会在花额度之前直接拦下。</div>
 
+    <label class="f" style="margin-top:12px">⑥ 素材授权</label>
+    <select id="rights">
+      <option value="unknown" selected>未声明（默认）</option>
+      <option value="owned">自有产品实拍，数据真实</option>
+      <option value="licensed">已获授权的第三方素材</option>
+      <option value="third_party">第三方品牌素材，未授权（仅内部）</option>
+      <option value="sample">示例 / 演示素材（仅内部）</option>
+    </select>
+    <div class="note">选了「仅内部」的，导出目录会自动带一份说明文件，避免误当正式物料发出去。</div>
+
     <div id="copyBox" style="display:none">
       <label class="f" style="margin-top:10px">标题</label>
       <input id="cpTitle" type="text" placeholder="例：奶油肌气垫 遮瑕不卡粉" />
@@ -336,6 +346,12 @@ function renderBatch(b) {
            (cat.reasons || []).length ? "　" + cat.reasons[0] : ""}</div>`
     : "";
   const sem = b.semantic;
+  // 授权：可正式交付就用淡色一行；仅内部/未声明用警告色，且说清后果
+  const rt = b.rights;
+  const rightsLine = !rt ? "" : (rt.level === "ok"
+    ? `<div class="note" style="opacity:.7">授权：${rt.label}</div>`
+    : `<div class="note" style="color:var(--warn)"><b>授权：${rt.label}</b>　${rt.note}${
+        rt.level === "internal" ? "　导出目录会自动写入「仅内部参考」说明" : ""}</div>`);
   const semLine = sem
     ? (sem.checked
         ? `<div class="note">语义校验：已用 ${sem.model} 判「同一款产品 / 文字乱码 / 比例」</div>`
@@ -356,6 +372,7 @@ function renderBatch(b) {
     ${tplLine}
     ${tierLine}
     ${catLine}
+    ${rightsLine}
     ${semLine}
     ${b.engine_note ? `<div class="note" style="color:var(--warn)">${b.engine_note}</div>` : ""}
     ${partial}
@@ -447,7 +464,9 @@ async function doExport(batchId) {
     if (!res.ok) throw new Error(data.error || "导出失败");
     const links = data.files.map(f =>
       `<a href="${f.url}" download target="_blank">#${f.index} ${f.size.join("×")}</a>`).join("　");
-    msg.innerHTML = "已导出：" + links;
+    const warn = (data.rights && data.rights.warning)
+      ? `<div style="color:var(--warn);margin-top:8px">${data.rights.warning}</div>` : "";
+    msg.innerHTML = "已导出：" + links + warn;
   } catch (e) {
     msg.textContent = e.message;
   }
@@ -508,6 +527,7 @@ $("btnRun").onclick = async () => {
         candidates: Number($("cands").value),
         template: $("template").value || "scene",
         category: $("category").value || "auto",
+        rights: $("rights").value || "unknown",
         copy: currentCopy(),
         materials: state.materials,
         exemplars: state.exemplars

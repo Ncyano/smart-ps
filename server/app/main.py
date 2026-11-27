@@ -16,6 +16,7 @@ from urllib.parse import unquote, urlparse
 
 from . import config as cfgmod
 from . import jobs
+from . import rights
 from . import store
 from . import templates
 from .config import DATA_DIR, WEB_DIR
@@ -169,6 +170,14 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 2 and parts[1] == "export":
                 return self._export(batch, payload)
 
+            # 补声明素材授权：老批次或忘记填的，导出前后都能补，不必重新生成
+            if len(parts) == 2 and parts[1] == "rights":
+                declared = str(payload.get("rights") or "").strip()
+                r = rights.resolve(declared)
+                batch["rights"] = r.to_dict()
+                store.save_batch(batch)
+                return self._json({"ok": True, "rights": batch["rights"], "batch": batch["id"]})
+
         return self._err("未找到", 404)
 
     # ─── 审核：选定 / 淘汰 / 复位 ───
@@ -234,7 +243,8 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
             return self._err(f"导出失败：{exc}", 500)
-        return self._json({"batch": batch["id"], "files": files})
+        gate = rights.gate(batch)
+        return self._json({"batch": batch["id"], "files": files, "rights": gate})
 
 
 def main() -> None:
