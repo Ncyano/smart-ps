@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from server.app import claims as C  # noqa: E402
 from server.app import gate as G  # noqa: E402
+from server.app import rights  # noqa: E402
 from server.app import taxonomy  # noqa: E402
 
 PASS = FAIL = 0
@@ -39,7 +40,10 @@ def base_batch(**kw) -> dict:
         "id": "test-batch",
         "template": "scene",
         "template_compose": False,
-        "rights": {"declared": "owned"},
+        # 授权要带声明人与时间：只有等级、没有署名的声明，正式导出会被拦
+        "rights": {"declared": "owned", "declared_by": "测试",
+                   "declared_at": "2026-01-01T00:00:00", "evidence": "验收用例",
+                   "verified": False},
         "category_check": {"ok": True, "status": "skipped", "source": "文案未指向具体品类",
                            "copy_category": "unknown", "image_category": "unknown"},
         "claims_audit": {"status": "pass", "findings": [], "data_items": [], "missing_fields": []},
@@ -227,7 +231,31 @@ def main() -> int:
     check("无声明且无模型 → unchecked + 原因",
           res.status == "unchecked" and bool(res.unchecked_reason), res.unchecked_reason)
 
-    print("\n【8】闸门：需求完整度（任务单缺失 / 缺项）")
+    print("\n【8】闸门：授权声明的留痕（声明≠核验）")
+    b = base_batch()
+    b["rights"] = {"declared": "owned"}
+    d = G.evaluate(b, b["candidates"][0])
+    check("无署名的声明仍判 pass（等级够）", d.status == G.DELIVERABLE, d.reason[:50])
+    G.apply(b)                     # 正式闸门读 batch["delivery"]，先跑一遍
+    ok, why = G.formal_ready(b)
+    check("但正式导出被拦", not ok and "声明人" in why, why[:60])
+    # 界面靠 delivery.formal_ready 决定按钮亮不亮，口径必须与导出闸门一致，
+    # 否则会出现"按钮能点、点下去 409"
+    check("界面口径同步（按钮应为灰）", b["delivery"]["formal_ready"] is False,
+          str(b["delivery"].get("reason"))[:40])
+    r = rights.stamp({}, "owned", by="张三", evidence="合同 A-01")
+    b["rights"] = r
+    G.apply(b)
+    ok, why = G.formal_ready(b)
+    check("补了声明人后可正式导出", ok, why[:60])
+    check("声明里记了人、时间、依据",
+          r["declared_by"] == "张三" and bool(r["declared_at"]) and "合同" in r["evidence"],
+          r["provenance"][:50])
+    check("未核验要说出来", "未经核验" in r["provenance"], r["provenance"][-20:])
+    r2 = rights.stamp({}, "owned", by="张三", verified=True, verified_by="法务")
+    check("核验后措辞改为已核验", "已核验" in r2["provenance"], r2["provenance"][-24:])
+
+    print("\n【9】闸门：需求完整度（任务单缺失 / 缺项）")
     b = base_batch()
     b.pop("task")
     d = G.evaluate(b, b["candidates"][0])

@@ -142,7 +142,12 @@
       <option value="third_party">第三方品牌素材，未授权（仅内部）</option>
       <option value="sample">示例 / 演示素材（仅内部）</option>
     </select>
-    <div class="note">选了「仅内部」的，导出目录会自动带说明文件与水印副本，避免误当正式物料发出去。</div>
+    <input id="rightsBy" type="text" placeholder="授权声明人（正式导出必填）"
+      style="margin-top:8px" />
+    <input id="rightsEv" type="text" placeholder="依据：合同号 / 授权书文件名（可留空）"
+      style="margin-top:6px" />
+    <div class="note">选了「仅内部」的，导出目录会自动带说明文件与水印副本，避免误当正式物料发出去。
+      声明会记下名字与时间：<b>声明不等于核验</b>，正式导出要求能追到人。</div>
 
     <div id="tplInputs" style="display:none"></div>
 
@@ -477,6 +482,12 @@ function taskLine(b) {
     <br><b>生成区</b>：${esc((z.may_change || []).join("；"))}
     <br><b>禁止</b>：${esc((z.forbid || []).join("；"))}
     ${block.length ? `<br><span style="color:var(--bad)">待补：${block.map(u => esc(u.field + "：" + u.why)).join("；")}</span>` : ""}
+    ${b.cases ? (() => {
+      const ok = (b.cases.successes || []).length, bad = (b.cases.failures || []).length;
+      if (!ok && !bad) return `<br><b>历史案例</b>　同类物料还没有记录，检索为空（不拿示例冒充先例）`;
+      return `<br><b>历史案例</b>　${ok ? `可参考的历史成图 ${ok} 张` : ""}${ok && bad ? " · " : ""}${bad ? `踩坑 ${bad} 条` : ""}
+        ${b.cases.prompt_note ? `<br><span style="color:var(--warn)">${esc(b.cases.prompt_note)}</span>` : ""}`;
+    })() : ""}
   </div>`;
 }
 
@@ -507,7 +518,7 @@ function renderBatch(b) {
 
   const rt = b.rights;
   const rightsLine = !rt ? "" : (rt.level === "ok"
-    ? `<div class="note" style="opacity:.7">授权：${esc(rt.label)}</div>`
+    ? `<div class="note" style="opacity:.7">授权：${esc(rt.label)}　${esc(rt.provenance || "")}</div>`
     : `<div class="note" style="color:var(--warn)"><b>授权：${esc(rt.label)}</b>　${esc(rt.note)}${
         rt.level === "internal" ? "　导出会带「仅内部参考」说明与带水印副本" : ""}</div>`);
 
@@ -710,6 +721,8 @@ $("btnRun").onclick = async () => {
         template: $("template").value || "scene",
         category: $("category").value || "auto",
         rights: $("rights").value || "unknown",
+        rights_by: $("rightsBy").value.trim(),
+        rights_evidence: $("rightsEv").value.trim(),
         copy: currentCopy(),
         claims: currentClaims(),
         corners: state2.corners || null,

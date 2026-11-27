@@ -54,7 +54,9 @@ def main() -> int:
         candidates=3,
         materials=materials,
         exemplars=exemplars,
-        rights="owned",          # 授权声明，否则闸门只能给"未声明"
+        # 授权声明 + 声明人：正式导出要求能追到人（声明≠核验）
+        rights="owned", rights_by="自检脚本", rights_evidence="本地自检，无外部素材",
+        source="selfcheck",
     )
     batch = run_batch(req)
 

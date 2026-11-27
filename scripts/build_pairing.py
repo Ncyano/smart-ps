@@ -33,7 +33,13 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
+from PIL import Image
+
 ROOT = Path(__file__).resolve().parents[1]
+# 让 `server.app` 可导入（本脚本要复用 fidelity 算结构相似度）。
+# 少了这一行，直接 `python scripts/build_pairing.py` 时导入会失败，
+# 相似度全被 except 吃掉，显示成"未算出"——静默降级，最难查。
+sys.path.insert(0, str(ROOT))
 DELIVER = ROOT / "交付"
 MAT_POOL = ROOT / "p图素材_例子"
 REQ_REF = ROOT / "素材例子"
@@ -108,6 +114,41 @@ def _infer(cat: str) -> tuple[str, list[str]]:
                 if w not in hits:
                     hits.append(w)
     return tpl, hits
+
+
+def _similarity(delivered: Path, candidates: list[Path]) -> tuple[float | None, str]:
+    """交付图 vs 候选素材的结构相关度。**只作证据，不作判定。**
+
+    为什么不能直接拿它当配对依据：交付图是排过版的成品（文字、色块、透视都在），
+    素材是原始照片，两者结构天然对不上。同一件产品通常 0.3–0.6，
+    不是同一件也可能 0.2–0.4——区间重叠，单独用会误配。
+    所以它只用来**排序和提示**，最终仍要人确认。
+    """
+    if not candidates:
+        return None, ""
+    try:
+        from server.app.pipeline import fidelity as fid
+    except Exception:  # noqa: BLE001 缺依赖时不影响台账
+        return None, ""
+    try:
+        src_im = Image.open(delivered)
+    except Exception:  # noqa: BLE001
+        return None, ""
+    best: tuple[float, str] = (-1.0, "")
+    for c in candidates:
+        try:
+            # 语义：成图 vs 素材（前者是候选，后者是源），别写反
+            r = fid.assess(src_im, Image.open(c), ignore_spread=True)
+        except Exception:  # noqa: BLE001
+            continue
+        v = r.get("structure")
+        if v is not None and v > best[0]:
+            best = (float(v), str(c))
+    if best[0] <= -1:
+        return None, ""
+    # 负相关是真实结论（"完全不像"），按 0 记，不要过滤掉——
+    # 过滤了会显示成"—"，看起来像"没算"，实际是"算了，一点都不像"。
+    return round(max(0.0, best[0]), 3), best[1]
 
 
 def _imgs(d: Path) -> list[Path]:
@@ -219,11 +260,19 @@ def build() -> list[dict]:
 
         mats = [m for _, _h, _s, m in mat_scored[:3]]
         ref = ref_scored[0] if ref_scored else None
+        # 关键词没配到素材时，仍然算一次"最像哪张"——只作人工参考，
+        # 状态不会因此变成可配对。没证据就标待确认，有线索就给出线索。
+        pool = [m["path"] for m in mats] or [m["path"] for m in MAT_POOL_ROWS if m["kind"] == "素材"]
+        sim, sim_path = _similarity(d["path"], pool)
+
         reasons = []
         if mats:
             reasons.append(f"素材命中「{mat_scored[0][1]}」×{mat_scored[0][0]}")
+        elif sim is not None:
+            tail = "可参考" if sim >= 0.45 else "低于 0.45，基本不像"
+            reasons.append(f"素材未命中关键词；视觉最接近的相似度 {sim}（{tail}）")
         else:
-            reasons.append("素材只命中泛词或无命中")
+            reasons.append("素材未命中关键词，相似度未算出")
         if ref:
             reasons.append(f"参考命中「{ref[1]}」×{ref[0]}")
         else:
@@ -237,9 +286,44 @@ def build() -> list[dict]:
             "候选素材": " | ".join(str(m["path"].relative_to(ROOT)).replace("\\", "/") for m in mats),
             "候选参考": str(ref[3]["path"].relative_to(ROOT)).replace("\\", "/") if ref else "",
             "匹配依据": "；".join(reasons) or "规则未命中",
+            "结构相似度": sim if sim is not None else "",
+            "相似度最高的候选": str(Path(sim_path).relative_to(ROOT)).replace("\\", "/") if sim_path else "",
             "状态": status,
         })
     return rows
+
+
+def merge_decisions(rows: list[dict]) -> tuple[list[dict], int]:
+    """合并人工决定。决定文件不存在就原样返回。
+
+    `verify/配对决定.csv` 由人填，列：`交付文件,状态,素材,参考,备注`。
+    状态取 `已确认` / `驳回`；留空或写 `待确认` 表示还没处理。
+    这里**只认人写的**：自动匹配结果永远不会自己变成"已确认"。
+    """
+    p = OUT / "配对决定.csv"
+    if not p.is_file():
+        return rows, 0
+    decisions = {}
+    for r in csv.DictReader(p.read_text(encoding="utf-8-sig").splitlines()):
+        f = (r.get("交付文件") or "").strip().replace("\\", "/")
+        if f:
+            decisions[f] = r
+    n = 0
+    for row in rows:
+        d = decisions.get(row["交付文件"])
+        if not d:
+            continue
+        st = (d.get("状态") or "").strip()
+        if st not in ("已确认", "驳回"):
+            continue
+        n += 1
+        row["状态"] = st
+        for key, col in (("素材", "候选素材"), ("参考", "候选参考")):
+            v = (d.get(key) or "").strip()
+            if v:
+                row[col] = v
+        row["匹配依据"] = "人工确认" + (f"：{d.get('备注')}" if d.get("备注") else "")
+    return rows, n
 
 
 def report(rows: list[dict]) -> str:
@@ -271,9 +355,11 @@ def report(rows: list[dict]) -> str:
     todo = [r for r in rows if r["状态"] != "可配对"]
     lines += ["", "## 待确认清单", ""]
     if todo:
-        lines += ["| 交付文件 | 类别 | 原因 |", "|---|---|---|"]
+        lines += ["| 交付文件 | 类别 | 建议模板 | 结构相似度 | 原因 |", "|---|---|---|---:|---|"]
         for r in todo[:40]:
-            lines.append(f"| `{Path(r['交付文件']).name}` | {r['类别']} | {r['匹配依据']} |")
+            sim = r.get("结构相似度")
+            lines.append(f"| `{Path(r['交付文件']).name}` | {r['类别']} | {r['建议模板'] or '—'} | "
+                         f"{sim if sim != '' else '—'} | {r['匹配依据']} |")
         if len(todo) > 40:
             lines.append(f"| … | | 还有 {len(todo) - 40} 条，见 CSV |")
     else:
@@ -299,6 +385,9 @@ def main() -> int:
     global MAT_POOL_ROWS
     MAT_POOL_ROWS = load_material_index()
     rows = build()
+    rows, confirmed = merge_decisions(rows)
+    if confirmed:
+        print(f"已合并人工决定 {confirmed} 条（verify/配对决定.csv）")
 
     OUT.mkdir(parents=True, exist_ok=True)
     csv_path = OUT / "配对台账.csv"

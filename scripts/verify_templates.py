@@ -242,6 +242,7 @@ def run_case(case: dict) -> dict:
         template=case["template"],
         materials=[payload(src, "m.png")],
         rights="owned",
+        source="selfcheck",
         copy=case.get("copy"),
         claims=case.get("claims") or [],
         corners=case.get("corners"),

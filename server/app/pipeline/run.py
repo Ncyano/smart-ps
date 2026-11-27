@@ -32,6 +32,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from .. import cases as casesmod
 from .. import claims as claimsmod
 from .. import gate
 from .. import region as regionmod
@@ -155,6 +156,16 @@ def _fan_out(engine, gen_req: GenRequest, out_dir: Path, n: int, retries: int = 
     }
 
 
+def _rights_of(req) -> dict:
+    declared = getattr(req, "rights", "unknown") or "unknown"
+    by = str(getattr(req, "rights_by", "") or "").strip()
+    ev = str(getattr(req, "rights_evidence", "") or "").strip()
+    if by:
+        holder: dict = {}
+        return rightsmod.stamp(holder, declared, by=by, evidence=ev)
+    return rightsmod.resolve(declared).to_dict()
+
+
 def _payload_image(payload, dest: Path) -> Image.Image | None:
     if payload is None:
         return None
@@ -198,6 +209,7 @@ def run_batch(req, cfg: dict | None = None, batch_id: str | None = None, on_prog
         "claims": [c.model_dump() if hasattr(c, "model_dump") else c
                    for c in (getattr(req, "claims", None) or [])],
         "request_id": getattr(req, "request_id", ""),
+        "source": getattr(req, "source", "") or st.get("source") or "api",
     })
     st["corners"] = getattr(req, "corners", None) or st.get("corners")
 
@@ -216,6 +228,16 @@ def run_batch(req, cfg: dict | None = None, batch_id: str | None = None, on_prog
             exemplars=[e.name for e in (getattr(req, "exemplars", None) or [])],
         )
     task_spec = st["task"]
+
+    # 同类物料的历史案例（成功 + 踩过的坑）。只有真实记录才算数，
+    # 没有就是没有——不要拿示例图冒充先例。
+    if "cases" not in st:
+        try:
+            st["cases"] = casesmod.brief(tpl.id)
+        except Exception:  # noqa: BLE001 案例检索失败不该拖垮出图
+            st["cases"] = {"template": tpl.id, "successes": [], "failures": [],
+                           "prompt_note": ""}
+    case_brief = st["cases"]
 
     # ── 落盘原始输入（恢复时跳过） ──
     if "materials" not in st:
@@ -258,6 +280,8 @@ def run_batch(req, cfg: dict | None = None, batch_id: str | None = None, on_prog
         # 会顺手把包装上的字重画一遍。
         if task_spec.get("prompt_block"):
             prompt = prompt + "\n" + task_spec["prompt_block"]
+        if case_brief.get("prompt_note"):
+            prompt = prompt + "\n" + case_brief["prompt_note"]
         if tpl.prompt_extra:
             prompt = prompt + "\n" + "\n".join(tpl.prompt_extra)
         if tpl.negative_extra:
@@ -501,12 +525,15 @@ def run_batch(req, cfg: dict | None = None, batch_id: str | None = None, on_prog
         "template_compose": tpl.compose,
         "copy": copy,
         # 需求单：物料类型/三类区域/验收条件/待确认项，闸门与制作记录都读它
+        "source": st.get("meta", {}).get("source") or "api",
         "task": task_spec,
+        # 本批检索到的历史案例：界面可展示，制作记录里也留一份
+        "cases": case_brief,
         "category_check": cat_check,
         "claims_audit": claims_audit,
-        # 素材授权：决定这批图能不能标"可正式交付"。声明了第三方/示例就只算内部参考
-        "rights": rightsmod.resolve(
-            getattr(req, "rights", "unknown")).to_dict(),
+        # 素材授权：决定这批图能不能标"可正式交付"。声明了第三方/示例就只算内部参考。
+        # 带署名的走 stamp（记人与时间），没署名的只记等级——正式导出时会被拦下。
+        "rights": _rights_of(req),
         "semantic": {
             "checked": bool(judge_ok) and not tpl.compose,
             "model": (semantics[0].model if semantics else ""),

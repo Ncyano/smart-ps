@@ -135,6 +135,7 @@ server/app/
   review.py           ★ 审核反馈闭环（问题类型 → 修法，落日志可统计）
   redo.py             ★ 定向重做（本地 0 元先修，修不了才回引擎）
   record.py           ★ 逐张制作记录（七块，导出时写 record.json / 记录.md）
+  cases.py            ★ 案例检索：同类物料的历史成功/踩坑记录（只认真实数据）
   rights.py           素材授权五级声明 → 三级交付范围
   gate.py             ★ 交付闸门：逐项判定，全过才可交付
   claims.py           ★ 合规文字 + 数据来源检查（生成前硬拦截）
@@ -170,12 +171,14 @@ knowledge/            ★ 项目知识库（踩坑库 / 工艺路线 / 参数实
 | GET | `/api/templates` | 工艺模板列表（含所需文案字段与额外输入） |
 | GET | `/api/taxonomy` | 品类 / 物料注册表 |
 | GET | `/api/feedback` | 反馈统计：按问题类型 / 模板计数，附改进建议 |
+| GET | `/api/cases?template=&issues=` | 同类物料的历史案例（成功 + 踩坑），供任务单与界面展示 |
 | POST | `/api/batches/{id}/feedback` | 结构化审核意见：`{"index":1,"issues":["pack_text"],"disposition":"rejected","note":"瓶身字被改"}` |
 | POST | `/api/batches/{id}/redo` | 定向重做：`{"index":1,"issues":[...],"plan_only":true}` 只出方案；不带 `plan_only` 执行本地能修的部分 |
 | POST | `/api/scenes/detect` | 场景照找四角，回置信度；不足时前端转人工校准 |
 | POST | `/api/batches` | **跑一批**：素材 + 例图 + 文字。默认异步即时返回 job，`?sync=1` 同步返回结果 |
 | POST | `/api/batches/{id}/review` | 审核：`{"index":2,"action":"choose\|reject\|reset\|confirm\|unconfirm"}` |
 | POST | `/api/batches/{id}/export` | 导出：`{"size":"square_1080","formal":false}`，cover 裁切 |
+| POST | `/api/batches/{id}/rights` | 补授权声明：`{"rights":"owned","by":"张三","evidence":"合同 A-01"}`，记人与时间 |
 | POST | `/api/batches/{id}/retry` | 有检查点就续跑（不重复扣费） |
 | GET | `/api/batches` | 批次列表 |
 | GET | `/api/batches/{id}` | 未完成返回 job 状态（stage/progress），完成返回批次详情 |
@@ -234,6 +237,11 @@ knowledge/            ★ 项目知识库（踩坑库 / 工艺路线 / 参数实
 
 汇总规则是**不做加权、不做抵消**：有硬失败 → 不可用；授权仅内部 → 仅内部；
 任何一项 warn / unknown → 待人工；全过 → 可交付。
+
+**声明 ≠ 核验。** 授权声明必须记下「谁说的、什么时候、凭什么」：
+`rights_by` + `rights_evidence` 写进 `rights_log`，闸门说明里带出这句话。
+只有等级、没有署名的声明，正式导出会被拦（409）——出事时得能回答"谁说有授权的"。
+`verified` 是另一件事，只有真看过授权原件才为 true，措辞由「未经核验」改为「已核验」。
 
 `unknown` 单独一档是这次改动的重点：视觉模型没开通、品类没看成、没人核对过，
 都不是"没问题"，是"没人看过"。把没看过的当通过，是这类系统最容易犯的错。
@@ -325,6 +333,24 @@ python scripts/verify_templates.py -k price # 只跑某类
 结果写到 `verify/report.md`：每个模板的画布、版式结论、确认前后状态、成本与耗时。
 反例包括缺标题、缺现价、列数不一致、缺扫描件、四角贴满整图——这些情况必须失败。
 
+## 用真实数据做的两次校准
+
+这两个脚本不打分、不美化，只回答"现在到底行不行"。
+
+```bash
+python scripts/bench_judge.py        # 判定模型（Seed 2.1 Lite）逐格准确率
+python scripts/calibrate_gate.py     # 拿 18 张真实交付图过一遍闸门
+```
+
+**判定模型**（`verify/judge_report.md`）：`same_product` 7/7、`aspect_ok` 2/4
+（压扁 17%、拉长 25% 都说"比例正常"，把握 99）、`text_ok` 只有 1 个负样本，不足以定论。
+所以产线里 `aspect_ok` 只作提示，永不单独判死。
+
+**闸门校准**（`verify/gate_calibration.md`）：`交付/` 18 张全部落「仅内部参考」
+（都是第三方品牌素材），其中 9 张还卡在「数据来源」——因为在图上的价格与含量
+没有绑定出处。这证明授权与来源两项对真实图确实生效，**不是靠人记得**。
+这份报告**不证明**保真阈值合适：历史图没有可追溯素材，像素项标 `skip`。
+
 ## 这一版有什么、没有什么
 
 **已有**
@@ -347,6 +373,12 @@ python scripts/verify_templates.py -k price # 只跑某类
 - **逐张制作记录**：导出时写 `record.json` + `记录.md`
 - **配对台账**：交付 33 张 → 12 可配对 / 21 待确认（素材池只有 11 张，覆盖不了）
 - **模型对照评测脚本**：固定样本 + 一次可用率 / 单张可用成本
+- **判定模型实测**：`same_product` 可信、`aspect_ok` 不可信（有数字）
+- **闸门真实样本校准**：18 张真实交付图逐张过，落 `verify/gate_calibration.md`
+- **授权声明留痕**：声明人 / 时间 / 依据 / 是否核验，正式导出要求能追到人
+- **案例检索**：同类物料的历史成功与踩坑记录进提示词（只认真实审核数据）
+- **配对台账升级**：结构相似度作线索 + `配对决定.csv` 人工确认合并
+- **内部演示副本**：`scripts/mark_internal.py` 批量盖章，原图不动
 
 **还没有（按里程碑排）**
 
@@ -366,10 +398,18 @@ python scripts/verify_templates.py -k price # 只跑某类
 - **配对台账用关键词规则，不是语义**：33 张交付里 12 张可配对、21 张待确认，
   原因是素材池只有 11 张（没有大屏 / 表格 / 尺码 / 海报的素材）。待确认要人看一眼，
   台账里不编配对——编一次，后面的评测就全歪。
+- **Seed 2.1 Lite 不能出图**：拿它去调生图接口，方舟直接回
+  `400 InvalidParameter: image generation is only supported by certain models`。
+  它在本项目里的角色是**判定**，不是生成，所以"两款模型哪个出图更好"这个问题本身不成立。
+  它的判定能力已单独实测（`verify/judge_report.md`）：`same_product` 7/7 可信、
+  `aspect_ok` 2/4（17%/25% 变形仍说"正常"，把握 99）、`text_ok` 样本不足。
 - **模型对照只跑了 flash**：`doubao-seedream-5-0-flash` 4 类物料各 1 张，一次可用 1/4；
   `doubao-seedream-5-0-pro` 本账号**未开通**（4 次全 404），所以没有 pro 的数据。
   报告见 `verify/models_report.md`，脚本默认仍只打印计划，`--run` 才花钱。
 - 本地重做**不重跑语义判定**（不调视觉模型），所以重做后的图仍需人工确认一次。
+- **配对台账的相似度只是线索**：交付图是排过版的成品，与素材结构天然对不上，
+  同产品常常只有 0.1–0.4。待确认 21 张实测相似度 0.03–0.11，说明素材池里
+  **真的没有对应素材**，不是脚本偷懒。人工决定填 `verify/配对决定.csv` 后重跑合并。
 - 素材质量分是相对值，只用于排序，不是绝对画质评价。
 - 单页界面走的是整图 base64，单批 <= 96MB；批量大图场景后续换成直传 + 异步。
 - 控制台中文若乱码，是 Windows 终端代码页问题，`run.ps1` 已切到 UTF-8。

@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PIL import Image, ImageDraw  # noqa: E402
 
-from server.app import gate, record, redo, region, review, task, templates  # noqa: E402
+from server.app import cases, gate, record, redo, region, review, task, templates  # noqa: E402
 from server.app.pipeline import category, judge  # noqa: E402
 from server.app.pipeline.run import run_batch  # noqa: E402
 from server.app.schemas import BatchRequest, ImagePayload  # noqa: E402
@@ -219,6 +219,28 @@ def test_redo_compose() -> None:
     check("成本仍为 0", out["batch"]["cost_cny"] == 0 or True)
 
 
+def test_cases() -> None:
+    """案例检索：只认真实记录，没记录就返回空，不拿示例冒充。"""
+    print("\n【3b】案例检索")
+    # 换一份干净的日志：上一节刚写过一条，不清掉就测不到"没有记录"这条路
+    review.LOG_PATH = Path(tempfile.mkdtemp(prefix="cases-")) / "log.jsonl"  # type: ignore[assignment]
+    brief = cases.brief("kv")
+    check("没有记录时 failures 为空", brief["failures"] == [], str(len(brief["failures"])))
+    check("没有记录时提示词不加料", brief["prompt_note"] == "")
+
+    batch = {"id": "t-case", "template": "kv", "candidates": [{"index": 1}]}
+    for _ in range(2):
+        review.record(batch, 1, ["pack_text"], "rejected", note="重做")
+    b2 = cases.brief("kv")
+    check("有记录后能检索到", len(b2["failures"]) == 2, str(len(b2["failures"])))
+    check("提示词带上问题与修法",
+          "包装文字被改" in b2["prompt_note"] and "resynthesize" in b2["prompt_note"],
+          b2["prompt_note"][:60])
+    b3 = cases.brief("price")
+    check("按模板隔离（price 不串 kv 的记录）", b3["failures"] == [])
+    check("案例库规模会报出来", "batches" in cases.stats())
+
+
 # ─────────────────────────── 5. 制作记录 ───────────────────────────
 
 
@@ -272,6 +294,7 @@ def main() -> int:
     test_task()
     test_region()
     test_review()
+    test_cases()
     batch = test_e2e()
     test_redo(batch)
     test_redo_compose()

@@ -108,9 +108,15 @@ python scripts/kb_search.py --list
 **定向重做**（文案/数据/主体/贴屏本地 0 元修，写新版本不覆盖）、
 **逐张制作记录**（`record.json` + `记录.md`）、
 **配对台账**（`verify/配对台账.md`：12 可配对 / 21 待确认）、
-**模型对照评测脚本**（默认只出计划，未真跑）。
+**模型对照评测脚本**（flash 已实跑：1/4 一次可用；pro 账号未开通）、
+**判定模型实测**（same_product 7/7、aspect_ok 2/4）、
+**闸门真实样本校准**（18 张真实交付 → 全落仅内部参考）、
+**授权声明留痕**（声明人/时间/依据/核验，正式导出要求能追到人）、
+**案例检索**（同类物料历史成功与踩坑进提示词）、
+**配对台账升级**（结构相似度 + 人工决定合并）、
+**内部演示副本**（批量盖章，原图不动）。
 
-未做：权限、试点部署、模型对照实跑（要用额度，等确认）。
+未做：权限、试点部署。
 详细施工顺序见 `搭建步骤.md`。
 
 ## 关键文件
@@ -128,6 +134,7 @@ python scripts/kb_search.py --list
 | `server/app/redo.py` | ★ 定向重做：本地 0 元先修，修不了才回引擎 |
 | `server/app/record.py` | ★ 逐张制作记录（七块，导出时写） |
 | `server/app/region.py` | 分区事后核查（只提示，不进闸门） |
+| `server/app/cases.py` | ★ 案例检索：同类物料历史成功/踩坑（只认真实数据） |
 | `server/app/templates/builtin.py` | 生成类模板（scene/white_bg/kv） |
 | `server/app/templates/extra.py` | 合成类模板（pair/price/patent/table/screen） |
 | `server/app/export.py` | 导出 + manifest + 水印预览 + 正式闸门 |
@@ -146,12 +153,15 @@ python scripts/kb_search.py --list
 .\run.ps1                                        # 启动服务（8765）
 python scripts/smoke_test.py                     # 离线自检（含闸门明细）
 python scripts/verify_templates.py               # 按模板验收集（15 例，含反例）
-python scripts/test_gate.py                      # 闸门/合规/品类（46 条）
+python scripts/test_gate.py                      # 闸门/合规/品类（53 条）
 python scripts/test_feedback.py                  # 任务单/分区/反馈/重做/记录（56 条）
 python scripts/test_recovery.py                  # 检查点续跑 + 幂等（17 条）
 python scripts/bench_fidelity.py                 # 保真鉴别力标定
 python scripts/build_pairing.py                  # 交付↔素材↔参考 配对台账
 python scripts/bench_models.py                   # 模型对照：默认只出计划，--run 才花钱
+python scripts/bench_judge.py                    # 判定模型逐格准确率（约 3 分钟）
+python scripts/calibrate_gate.py                 # 拿真实交付图过一遍闸门
+python scripts/mark_internal.py                  # 生成带水印的内部演示副本
 ```
 
 ## 写文档的地方

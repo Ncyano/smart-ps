@@ -36,6 +36,10 @@ class BatchRequest(BaseModel):
     # 素材授权：owned 自有 / licensed 已授权 / third_party 第三方未授权 /
     # sample 示例 / unknown 未声明（默认）。决定能否标"可正式交付"，见 rights.py
     rights: str = "unknown"
+    # 是谁声明的、凭据是什么。声明≠核验：正式导出要求能追到人，
+    # 空的 `rights_by` 会让正式导出被拦（闸门会说明原因）。
+    rights_by: str = ""
+    rights_evidence: str = ""
     # 数据来源声明：价格、含量、专利号的出处。缺了就是"待人工"，见 claims.py
     claims: list[Claim] = Field(default_factory=list)
     # 成对输入（pair 模板）：使用前 / 使用后
@@ -48,6 +52,9 @@ class BatchRequest(BaseModel):
     evidence: ImagePayload | None = None
     # 幂等键：同一 request_id 重复提交只跑一次，不重复付费
     request_id: str = ""
+    # 来源标记：留给自检/验收集用（"selfcheck"）。真实提交留空即可。
+    # 案例检索会跳过 selfcheck，避免把测试图当成"历史成功案例"给设计师看。
+    source: str = ""
 
 
 class ConfigPatch(BaseModel):

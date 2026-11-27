@@ -16,6 +16,7 @@ from urllib.parse import unquote, urlparse
 
 from PIL import Image
 
+from . import cases as casesmod
 from . import config as cfgmod
 from . import gate
 from . import jobs
@@ -96,6 +97,18 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/taxonomy":
             return self._json(taxonomy.load().to_dict())
+
+        if path.startswith("/api/cases"):
+            q = urlparse(self.path).query or ""
+            tpl = ""
+            issues: list[str] = []
+            for kv in q.split("&"):
+                if kv.startswith("template="):
+                    tpl = unquote(kv.split("=", 1)[1])
+                elif kv.startswith("issues="):
+                    issues = [x for x in unquote(kv.split("=", 1)[1]).split(",") if x]
+            return self._json({"stats": casesmod.stats(),
+                               "brief": casesmod.brief(tpl, issues)})
 
         if path == "/api/feedback":
             # 反馈统计：下次该改哪里，看这里而不是凭印象
@@ -262,10 +275,18 @@ class Handler(BaseHTTPRequestHandler):
             # 补声明素材授权：老批次或忘记填的，导出前后都能补，不必重新生成
             if len(parts) == 2 and parts[1] == "rights":
                 declared = str(payload.get("rights") or "").strip()
-                r = rights.resolve(declared)
-                batch["rights"] = r.to_dict()
+                # 一律走 stamp：记声明人、时间与依据，并留一条变更日志。
+                # 直接赋值会丢掉"谁说的"，正式导出时又得回头猜。
+                out = rights.stamp(
+                    batch, declared,
+                    by=str(payload.get("by") or payload.get("reviewer") or "").strip(),
+                    evidence=str(payload.get("evidence") or "").strip(),
+                    verified=bool(payload.get("verified")),
+                    verified_by=str(payload.get("verified_by") or "").strip(),
+                )
+                gate.apply(batch)
                 store.save_batch(batch)
-                return self._json({"ok": True, "rights": batch["rights"], "batch": batch["id"]})
+                return self._json({"ok": True, "rights": out, "batch": batch})
 
         return self._err("未找到", 404)
 

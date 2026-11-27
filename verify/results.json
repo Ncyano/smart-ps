@@ -12,8 +12,8 @@
     "blockers": [],
     "engine": "mock",
     "cost_cny": 0.0,
-    "seconds": 1.7,
-    "batch": "20261127-114317-a44a2c",
+    "seconds": 1.9,
+    "batch": "20261127-123123-345724",
     "reason": "全部检查项有证据通过",
     "problems": [],
     "ok": true
@@ -32,7 +32,7 @@
     "engine": "mock",
     "cost_cny": 0.0,
     "seconds": 1.1,
-    "batch": "20261127-114319-6295e3",
+    "batch": "20261127-123125-94595e",
     "reason": "全部检查项有证据通过",
     "problems": [],
     "ok": true
@@ -54,7 +54,7 @@
     "engine": "mock",
     "cost_cny": 0.0,
     "seconds": 1.1,
-    "batch": "20261127-114320-cefec4",
+    "batch": "20261127-123126-725f53",
     "reason": "待人工（卡在：产品主体、标签/细节）：产品主体：主体只对上 0.43：可能被重绘，需人看一眼；标签/细节：标签区只对上 0.46：文字/Logo 可能被重绘",
     "problems": [],
     "ok": true
@@ -75,7 +75,7 @@
     "engine": "mock",
     "cost_cny": 0.0,
     "seconds": 1.0,
-    "batch": "20261127-114321-a8f4e6",
+    "batch": "20261127-123127-3e1307",
     "reason": "硬门槛未过：版式自检（卖点图缺少标题（copy.title））",
     "problems": [],
     "ok": true
@@ -95,8 +95,8 @@
     ],
     "engine": "mock",
     "cost_cny": 0.0,
-    "seconds": 1.0,
-    "batch": "20261127-114322-ae169e",
+    "seconds": 1.1,
+    "batch": "20261127-123129-98f073",
     "reason": "待人工（卡在：产品主体）：产品主体：主体只对上 0.70：可能被重绘，需人看一眼",
     "problems": [],
     "ok": true
@@ -118,7 +118,7 @@
     "engine": "mock",
     "cost_cny": 0.0,
     "seconds": 1.1,
-    "batch": "20261127-114323-2b8989",
+    "batch": "20261127-123130-1a97a1",
     "reason": "硬门槛未过：版式自检（缺现价（copy.price_now）：价格图没有价格就是废图，且不能由系统编）",
     "problems": [],
     "ok": true
@@ -140,7 +140,7 @@
     "engine": "mock",
     "cost_cny": 0.0,
     "seconds": 1.1,
-    "batch": "20261127-114324-42076d",
+    "batch": "20261127-123131-4c7e9b",
     "reason": "待人工（卡在：数据来源）：数据来源：现价 199 没有出处",
     "problems": [],
     "ok": true
@@ -159,7 +159,7 @@
     "engine": "compose",
     "cost_cny": 0.0,
     "seconds": 0.2,
-    "batch": "20261127-114325-201ad0",
+    "batch": "20261127-123132-d8c65e",
     "reason": "全部检查项有证据通过",
     "problems": [],
     "ok": true
@@ -180,8 +180,8 @@
     ],
     "engine": "compose",
     "cost_cny": 0.0,
-    "seconds": 0.1,
-    "batch": "20261127-114326-00c3d0",
+    "seconds": 0.2,
+    "batch": "20261127-123132-bfd214",
     "reason": "硬门槛未过：版式自检（未附原件扫描件：证据图不允许由模型生成证书内容）",
     "problems": [],
     "ok": true
@@ -202,7 +202,7 @@
     "engine": "compose",
     "cost_cny": 0.0,
     "seconds": 0.2,
-    "batch": "20261127-114326-55f076",
+    "batch": "20261127-123132-8af786",
     "reason": "待人工（卡在：数据来源）：数据来源：含量/剂量 800mg、含量/剂量 500mg、价格 259 元、价格 229 元 没有出处",
     "problems": [],
     "ok": true
@@ -224,7 +224,7 @@
     "engine": "compose",
     "cost_cny": 0.0,
     "seconds": 0.2,
-    "batch": "20261127-114326-fe8e99",
+    "batch": "20261127-123132-fd00a8",
     "reason": "硬门槛未过：版式自检（第 1 行列数与表头不一致（3 列））",
     "problems": [],
     "ok": true
@@ -243,7 +243,7 @@
     "engine": "compose",
     "cost_cny": 0.0,
     "seconds": 0.3,
-    "batch": "20261127-114326-80d166",
+    "batch": "20261127-123133-3f1d62",
     "reason": "全部检查项有证据通过",
     "problems": [],
     "ok": true
@@ -263,8 +263,8 @@
     ],
     "engine": "compose",
     "cost_cny": 0.0,
-    "seconds": 0.1,
-    "batch": "20261127-114326-003fc3",
+    "seconds": 0.2,
+    "batch": "20261127-123133-d428b6",
     "reason": "硬门槛未过：版式自检（缺少「使用前」原图（成对模板必须两张都在，不能只给结果））",
     "problems": [],
     "ok": true
@@ -283,7 +283,7 @@
     "engine": "compose",
     "cost_cny": 0.0,
     "seconds": 0.3,
-    "batch": "20261127-114327-3040d5",
+    "batch": "20261127-123133-b12bb0",
     "reason": "全部检查项有证据通过",
     "problems": [],
     "ok": true
@@ -304,7 +304,7 @@
     "engine": "compose",
     "cost_cny": 0.0,
     "seconds": 0.2,
-    "batch": "20261127-114327-9178f1",
+    "batch": "20261127-123134-b2a6e8",
     "reason": "硬门槛未过：版式自检（四角围出的面积占整图 100%，不像一块屏幕：请重新校准）",
     "problems": [],
     "ok": true

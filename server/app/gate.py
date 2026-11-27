@@ -108,7 +108,13 @@ def _mk(cid: str, label: str, status: str, detail: str = "", hard: bool = False,
 def _rights_check(batch: dict) -> Check:
     r = rightsmod.for_batch(batch)
     if r.level == "ok":
-        return _mk("rights", "素材授权", PASS, f"{r.declared}（{r.note}）", hard=True)
+        # 状态只看等级，但说明里必须带"谁声明的、凭什么"。
+        # 声明不等于核验，这句话要一直跟着它走，不能只在导出时才提。
+        return _mk("rights", "素材授权", PASS,
+                   f"{r.declared}（{r.note}）· {r.provenance}",
+                   hard=True,
+                   action="" if r.declared_by else
+                   "补声明人与依据：正式导出要求能追到人（声明≠核验）")
     if r.level == "internal":
         return _mk("rights", "素材授权", FAIL, r.note, hard=True,
                    action="换自有素材，或取得书面授权后重新声明为 licensed")
@@ -345,13 +351,23 @@ def apply(batch: dict) -> dict:
         best["suggested"] = True
 
     rights = rightsmod.for_batch(batch)
-    formal_ready = bool(best is not None and rights.level == "ok")
+    # 正式交付要三件事同时成立：有可交付候选、授权等级 ok、声明能追到人。
+    # 少最后一条会让界面把按钮点亮、点下去再 409——那种"点了才知道不行"最招人烦。
+    prov_ok = rights.level == "ok" and bool(rights.declared_by)
+    formal_ready = bool(best is not None and prov_ok)
+    if formal_ready:
+        reason = ""
+    elif best is None:
+        reason = "没有可交付候选"
+    elif rights.level != "ok":
+        reason = f"素材授权为「{rights.label}」"
+    else:
+        reason = "授权只有等级、没有声明人与依据：补「声明人」后才能正式导出"
     batch["delivery"] = {
         "summary": summary,
         "formal_ready": formal_ready,
         "rights_level": rights.level,
-        "reason": "" if formal_ready else (
-            "没有可交付候选" if best is None else f"素材授权为「{rights.label}」"),
+        "reason": reason,
     }
     batch["status"] = "ok" if formal_ready else (
         "internal_only" if rights.level == "internal" and best is not None else "needs_review"
@@ -363,6 +379,12 @@ def formal_ready(batch: dict) -> tuple[bool, str]:
     """正式交付闸门。导出 formal=true 时调用。"""
     d = batch.get("delivery") or {}
     if d.get("formal_ready"):
+        # 授权声明要能追到人。一堆"声明为自有"但没有署名，等于没有声明——
+        # 出事时没人能回答"当时是谁说有授权的"。
+        r = rightsmod.for_batch(batch)
+        if r.level == "ok" and not r.declared_by:
+            return False, ("授权只有等级、没有声明人与依据：请在批次里补「声明人」"
+                           "（可附授权书/合同编号），系统会记下名字与时间。")
         return True, ""
     rights = rightsmod.for_batch(batch)
     if rights.level != "ok":

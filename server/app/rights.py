@@ -66,6 +66,17 @@ class Rights:
     label: str
     note: str
     invalid: bool = False   # 传了无法识别的值
+    # ── 声明的来源。声明不等于核验，这两件事必须分开记 ──
+    # 谁说的、什么时候说的、依据是什么文件。没有这三样，
+    # "声明为自有"和"没人说过"在事后看起来是一样的。
+    declared_by: str = ""
+    declared_at: str = ""
+    evidence: str = ""       # 授权书/采购凭证/合同编号，人看得懂就行
+    # 是否被**核验**过（看过授权原件、比对过采购记录）。
+    # verified=False 只代表"有人声明"，不代表"已核实"。
+    verified: bool = False
+    verified_by: str = ""
+    verified_at: str = ""
 
     @property
     def internal_only(self) -> bool:
@@ -79,13 +90,27 @@ class Rights:
             return f"仅内部参考：{self.note}。导出目录已写入 {EXPORT_NOTICE}，请勿用于对外投放。"
         return f"授权状态未确认：{self.note}。对外交付前请补充声明（owned / licensed / third_party / sample）。"
 
+    @property
+    def provenance(self) -> str:
+        """一句话说清这个声明是谁给的、凭什么。"""
+        if not self.declared_by:
+            return "未记录声明人与依据（正式导出会被拦）"
+        who = f"{self.declared_by} 于 {self.declared_at or '（未记时间）'} 声明"
+        if self.evidence:
+            who += f"，依据：{self.evidence}"
+        if self.verified:
+            return who + f"；已核验（{self.verified_by or '审核人'} @ {self.verified_at or '—'}）"
+        return who + "；未经核验（声明不等于核实）"
+
     def to_dict(self) -> dict:
         d = asdict(self)
         d["warning"] = self.warning
+        d["provenance"] = self.provenance
         return d
 
 
-def resolve(declared: str | None) -> Rights:
+def resolve(declared: str | None, *, by: str = "", at: str = "", evidence: str = "",
+            verified: bool = False, verified_by: str = "", verified_at: str = "") -> Rights:
     """把用户声明转成交付范围。无法识别的值按 unknown 处理，但标记 invalid。"""
     raw = str(declared or "").strip().lower()
     key = ALIASES.get(raw, raw)
@@ -95,15 +120,48 @@ def resolve(declared: str | None) -> Rights:
         key = UNKNOWN
     level, can, label, note = _TABLE[key]
     return Rights(declared=raw or UNKNOWN, level=level, can_deliver=can,
-                  label=label, note=note, invalid=invalid)
+                  label=label, note=note, invalid=invalid,
+                  declared_by=str(by or "").strip(), declared_at=str(at or "").strip(),
+                  evidence=str(evidence or "").strip(),
+                  verified=bool(verified),
+                  verified_by=str(verified_by or "").strip() if verified else "",
+                  verified_at=str(verified_at or "").strip() if verified else "")
 
 
 def for_batch(batch: dict) -> Rights:
     """从 batch.json 读声明。老批次没有这个字段 → 按 unknown。"""
     r = batch.get("rights")
     if isinstance(r, dict):
-        return resolve(r.get("declared"))
+        return resolve(r.get("declared"),
+                       by=r.get("declared_by") or "",
+                       at=r.get("declared_at") or "",
+                       evidence=r.get("evidence") or "",
+                       verified=bool(r.get("verified")),
+                       verified_by=r.get("verified_by") or "",
+                       verified_at=r.get("verified_at") or "")
     return resolve(None)
+
+
+def stamp(batch: dict, declared: str, *, by: str = "", evidence: str = "",
+          verified: bool = False, verified_by: str = "") -> dict:
+    """把一次授权声明写进批次，带上人与时间。
+
+    只写 declared 而不写 who/when，等于没有留痕：三个月后没人能说清
+    "自有"是谁说的。所以这个函数是唯一被允许改 batch["rights"] 的入口，
+    HTTP 层也走它，不要直接赋值。
+    """
+    from datetime import datetime
+
+    now = datetime.now().isoformat(timespec="seconds")
+    r = resolve(declared, by=by or "未署名", at=now, evidence=evidence,
+                verified=verified, verified_by=verified_by,
+                verified_at=now if verified else "")
+    batch["rights"] = r.to_dict()
+    log = batch.setdefault("rights_log", [])
+    log.append({"at": now, "declared": r.declared, "by": r.declared_by,
+                "evidence": r.evidence, "verified": r.verified,
+                "verified_by": r.verified_by})
+    return r.to_dict()
 
 
 def gate(batch: dict) -> dict:

@@ -1,0 +1,180 @@
+{
+  "at": "2026-11-27 12:19:18",
+  "probe": {
+    "model": "doubao-seed-2-1-lite-260915",
+    "supported": false,
+    "status": 400,
+    "message": "The parameter `model` specified in the request is not valid: image generation is only supported by certain models. Request id: 0217957531590431fa1229209a334fb8c06440209bf1030d21aea",
+    "code": "InvalidParameter"
+  },
+  "rows": [
+    {
+      "name": "产品原样",
+      "note": "对照组：同一张图应当全过",
+      "want": {
+        "same_product": true,
+        "aspect_ok": true,
+        "text_ok": true
+      },
+      "got": {
+        "same_product": true,
+        "aspect_ok": true,
+        "text_ok": true
+      },
+      "confidence": 99,
+      "checked": true,
+      "model": "doubao-seed-2-1-lite-260915",
+      "reason": "同品同比例，文字清晰无错",
+      "error": ""
+    },
+    {
+      "name": "产品纵向压扁 17%",
+      "note": "spread 抓不到的那一档；看视觉模型能不能看出来",
+      "want": {
+        "same_product": true,
+        "aspect_ok": false,
+        "text_ok": "-"
+      },
+      "got": {
+        "same_product": true,
+        "aspect_ok": true,
+        "text_ok": true
+      },
+      "confidence": 99,
+      "checked": true,
+      "model": "doubao-seed-2-1-lite-260915",
+      "reason": "产品外观比例文字均无异常",
+      "error": ""
+    },
+    {
+      "name": "产品横向拉长 25%",
+      "note": "同上，更极端一点",
+      "want": {
+        "same_product": true,
+        "aspect_ok": false,
+        "text_ok": "-"
+      },
+      "got": {
+        "same_product": true,
+        "aspect_ok": true,
+        "text_ok": true
+      },
+      "confidence": 99,
+      "checked": true,
+      "model": "doubao-seed-2-1-lite-260915",
+      "reason": "产品一致，比例正常，文字清晰无错",
+      "error": ""
+    },
+    {
+      "name": "同款产品 · 车间实拍",
+      "note": "同产品不同场景：工厂素材做品牌图时的真实输入",
+      "want": {
+        "same_product": true,
+        "aspect_ok": "-",
+        "text_ok": "-"
+      },
+      "got": {
+        "same_product": true,
+        "aspect_ok": true,
+        "text_ok": true
+      },
+      "confidence": 98,
+      "checked": true,
+      "model": "doubao-seed-2-1-lite-260915",
+      "reason": "同款产品，比例正常文字清晰",
+      "error": ""
+    },
+    {
+      "name": "人像原样",
+      "note": "人像没有包装文字，text_ok 不计分",
+      "want": {
+        "same_product": true,
+        "aspect_ok": true,
+        "text_ok": "-"
+      },
+      "got": {
+        "same_product": true,
+        "aspect_ok": true,
+        "text_ok": true
+      },
+      "confidence": 98,
+      "checked": true,
+      "model": "doubao-seed-2-1-lite-260915",
+      "reason": "主体一致，比例正常，文字清晰",
+      "error": ""
+    },
+    {
+      "name": "换成另一个人",
+      "note": "身份换了必须看得出来，否则前后对比图会张冠李戴",
+      "want": {
+        "same_product": false,
+        "aspect_ok": "-",
+        "text_ok": "-"
+      },
+      "got": {
+        "same_product": false,
+        "aspect_ok": true,
+        "text_ok": true
+      },
+      "confidence": 95,
+      "checked": true,
+      "model": "doubao-seed-2-1-lite-260915",
+      "reason": "主体不同，非同一产品展示",
+      "error": ""
+    },
+    {
+      "name": "人像 vs 产品（跨类）",
+      "note": "负样本：主体根本不是同一类东西",
+      "want": {
+        "same_product": false,
+        "aspect_ok": "-",
+        "text_ok": "-"
+      },
+      "got": {
+        "same_product": false,
+        "aspect_ok": true,
+        "text_ok": true
+      },
+      "confidence": 100,
+      "checked": true,
+      "model": "doubao-seed-2-1-lite-260915",
+      "reason": "图1无对应产品外观，二者不匹配",
+      "error": ""
+    }
+  ],
+  "summary": {
+    "same_product": {
+      "n": 7,
+      "hit": 7,
+      "acc": 1.0
+    },
+    "aspect_ok": {
+      "n": 4,
+      "hit": 2,
+      "acc": 0.5
+    },
+    "text_ok": {
+      "n": 1,
+      "hit": 1,
+      "acc": 1.0
+    },
+    "confident_wrong": [
+      {
+        "case": "产品纵向压扁 17%",
+        "field": "aspect_ok",
+        "want": false,
+        "got": true,
+        "confidence": 99
+      },
+      {
+        "case": "产品横向拉长 25%",
+        "field": "aspect_ok",
+        "want": false,
+        "got": true,
+        "confidence": 99
+      }
+    ],
+    "checked": 7,
+    "total": 7
+  }
+}
