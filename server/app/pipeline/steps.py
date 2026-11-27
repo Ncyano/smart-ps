@@ -126,7 +126,12 @@ def tone_match(im: Image.Image, profile: dict) -> Image.Image:
     # 判据必须用"背景像素占比"，不能只看分位数：这张图 p5=31，分位数护栏根本不触发。
     frac_white = float((l > 248).mean())
     frac_dark = float((l < 10).mean())
-    if frac_white > 0.35 or frac_dark > 0.50 or cur[0] > 198 or cur[2] < 58:
+    # 再补一条"没有暗部"的判据：p5 都在 150 以上、p50 在 200 以上，
+    # 说明这张图根本没有需要"找回"的暗部，硬拉曲线只会把整片浅底压暗。
+    # 实测：浅底产品图 p5=193 / p50=245，只靠上面那条 >248 占比判不出来，
+    # 结果 222 的底被压到 93 —— 和"白底压成中灰"是同一类错误。
+    no_shadow = cur[0] > 150 and cur[1] > 200
+    if frac_white > 0.35 or frac_dark > 0.50 or cur[0] > 198 or cur[2] < 58 or no_shadow:
         return im
 
     tune = profile.get("tone", {})

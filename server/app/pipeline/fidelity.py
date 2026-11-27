@@ -51,6 +51,10 @@ from PIL import Image
 
 # 尺度搜索网格（相对主体尺寸的缩放）
 _ISO_SCALES = (0.20, 0.26, 0.32, 0.38, 0.45, 0.52, 0.60, 0.70, 0.82, 0.95, 1.00, 1.15, 1.30)
+# 重排类模板（白底主图 / 卖点图）会把主体放大到画面 75%–90%，
+# 相对素材相当于 1.4–1.6 倍。只搜到 1.3 时找不到主体，转而匹配一小块纹理，
+# 结构分从 0.93 掉到 0.50 —— 不是图错了，是搜索范围没覆盖。
+_ISO_SCALES_WIDE = _ISO_SCALES + (1.45, 1.60, 1.80, 2.00)
 # patch 模式：成图里产品可能比素材里大也可能小，跨度要够宽
 _PATCH_SCALES = (0.40, 0.50, 0.65, 0.80, 1.00, 1.25, 1.50, 1.90, 2.40)
 
@@ -70,6 +74,11 @@ TIER_A_SPREAD = 0.15
 # sharp: 主体区域清晰度相对素材的比值。好图实测 0.90–1.68，模糊 6px 只有 0.50
 TIER_SHARP = 0.65
 PATCH_B = {"structure": 0.45}
+# 标签区（主体内部 12% 内缩）边缘相关，缩到 64×64 后比较。
+# 由 bench_fidelity.py 面板 C 校准：原样 0.70 / 换标签 0.00 / 标签糊掉 0.46。
+# 这条不是"审美分"，它只回答一个问题：标签上的图案还是不是原来那张。
+LABEL_A = 0.60
+LABEL_B = 0.40
 
 
 # ─────────────────────────── 素材读入与主体定位 ───────────────────────────
@@ -363,6 +372,168 @@ def _sharpness(l: np.ndarray) -> float:
 # ─────────────────────────── 主评估 ───────────────────────────
 
 
+def _subject_crop(im: Image.Image, info: dict | None = None) -> tuple[np.ndarray, np.ndarray, tuple]:
+    """取主体区域并归一化到 200×200。返回 (边缘图, 软掩码, 原框)。"""
+    src = _canvas(as_rgb(im), 320)
+    l = _luma(np.asarray(src, dtype=np.float32))
+    info = info or analyze_source(src)
+    box = info.get("box")
+    if info.get("mode") != "object" or not box:
+        box = (0, 0, src.width, src.height)
+    x, y, w, h = box
+    soft, _, _ = _subject_mask(l, box)
+    e = _edge(l)[y: y + h, x: x + w]
+    n = 200
+    a = _resize(e, n, n)
+    m = _resize(soft, n, n)
+    return a, m, box
+
+
+def _locate_subject(im: Image.Image, src_img: Image.Image, info: dict) -> tuple[int, int, int, int]:
+    """在成图里找"主体长在哪"：用**素材主体原比例**的模板去搜。
+
+    为什么不能拿归一化过的 200×200 模板来搜：归一化把长宽比拉平了，
+    一个细高瓶子的模板变成正方形，在成图里自然找不到——实测相关 -0.01。
+
+    这一步的存在原因：卖点图上压了整块文字区、价格图下压了价签，
+    主体检测会把文字/价签也算成"主体"，于是裁出来的区域完全对不上。
+    """
+    s_canvas = _canvas(as_rgb(src_img), 320)
+    l = _luma(np.asarray(s_canvas, dtype=np.float32))
+    if not info.get("box"):
+        return (0, 0, s_canvas.width, s_canvas.height)
+    x, y, w, h = info["box"]
+    tpl_e = _edge(l)[y: y + h, x: x + w]
+    tpl_m = _subject_mask(l, info["box"])[0]
+
+    cand = _canvas(as_rgb(im), 320)
+    c_l = _luma(np.asarray(cand, dtype=np.float32))
+    e = _edge(c_l)
+    H, W = e.shape
+    best = (-2.0, None)
+    for s in _ISO_SCALES_WIDE:
+        tw, th = int(tpl_e.shape[1] * s), int(tpl_e.shape[0] * s)
+        if tw >= W or th >= H or tw < 12 or th < 12:
+            continue
+        ncc, pos = _search(e, _resize(tpl_e, tw, th), weight=_resize(tpl_m, tw, th))
+        if ncc > best[0]:
+            best = (ncc, (pos[0], pos[1], tw, th))
+    if best[1] is None:
+        return (0, 0, cand.width, cand.height)
+    return best[1]
+
+
+def _assess_reframed(img: Image.Image, src: Image.Image, info: dict) -> dict:
+    """重排类模板的保真：先把两边都归一化成"主体特写"再比。
+
+    为什么要另走一路：白底主图/卖点图会把主体放大到画面 85%–90%，相对素材
+    是 1.3–1.5 倍。整幅搜索既受搜索范围限制，又要处理"比例被主动改掉"这件事，
+    实测同一张图在不同尺度间来回跳，结构分 0.43–0.50，全是搜索误差。
+
+    换成"各取主体、归一化、比内容"之后，尺度与画幅的影响被消掉，剩下的就是
+    主体本身像不像：换产品会掉到 0.3 以下，同一产品重排后仍在 0.85 以上。
+    """
+    s_e, s_m, s_box = _subject_crop(src, info)
+
+    def _norm_from(box) -> tuple[np.ndarray, np.ndarray]:
+        cand = _canvas(as_rgb(img), 320)
+        x, y, w, h = [int(v) for v in box]
+        w, h = max(4, min(w, cand.width - x)), max(4, min(h, cand.height - y))
+        l = _luma(np.asarray(cand, dtype=np.float32))
+        return _resize(_edge(l)[y: y + h, x: x + w], 200, 200), \
+            _resize(np.ones((h, w), dtype=np.float32), 200, 200)
+
+    def _corr(a, b, w):
+        wv = w.reshape(-1).astype(np.float64)
+        aa, bb = a.reshape(-1).astype(np.float64), b.reshape(-1).astype(np.float64)
+        mask = wv > 0.05
+        if mask.sum() < 64:
+            return 0.0
+        aa, bb, wv = aa[mask], bb[mask], wv[mask]
+        am, bm = (aa * wv).sum() / wv.sum(), (bb * wv).sum() / wv.sum()
+        va = ((aa - am) ** 2 * wv).sum()
+        vb = ((bb - bm) ** 2 * wv).sum()
+        if va <= 1e-6 or vb <= 1e-6:
+            return 0.0
+        return float(((aa - am) * (bb - bm) * wv).sum() / np.sqrt(va * vb))
+
+    # 成图里可能加了文字区/价签，主体检测会把文字块也算进"主体"。
+    # 所以同时试两条路：检测框 与 模板搜索框，取更吻合的那个。
+    cand = _canvas(as_rgb(img), 320)
+    ic_info = analyze_source(cand)
+    boxes = []
+    if ic_info.get("mode") == "object" and ic_info.get("box"):
+        boxes.append(tuple(ic_info["box"]))
+    boxes.append(_locate_subject(img, src, info))
+    i_e = i_m = None
+    i_box = boxes[0]
+    best = -2.0
+    for box in boxes:
+        e2, m2 = _norm_from(box)
+        sc2 = _corr(s_e, e2, s_m)
+        if sc2 > best:
+            best, i_e, i_m, i_box = sc2, e2, m2, box
+
+    structure = best
+    # 标签区：两边归一化图的内缩 12%，再缩到 64 比一次
+    n = 200
+    cut = int(n * 0.12)
+    t = s_e[cut: n - cut, cut: n - cut]
+    c = i_e[cut: n - cut, cut: n - cut]
+    wt = s_m[cut: n - cut, cut: n - cut]
+    if min(c.shape) >= 40:
+        lab_score = _corr(_resize(t, 64, 64), _resize(c, 64, 64), _resize(wt, 64, 64))
+        if lab_score >= LABEL_A:
+            lab = {"status": "pass", "score": round(lab_score, 3),
+                   "detail": f"标签区一致 {lab_score:.2f}"}
+        elif lab_score >= LABEL_B:
+            lab = {"status": "warn", "score": round(lab_score, 3),
+                   "detail": f"标签区只对上 {lab_score:.2f}：文字/Logo 可能被重绘"}
+        else:
+            lab = {"status": "fail", "score": round(lab_score, 3),
+                   "detail": f"标签区对不上（{lab_score:.2f}）：标签内容很可能被改了"}
+    else:
+        lab = {"status": "unknown", "score": None, "detail": "标签区过小，无法判断"}
+
+    sharp_ratio = None
+    s_hf = _sharpness(s_e)
+    i_hf = _sharpness(i_e)
+    if s_hf > 1e-3:
+        sharp_ratio = i_hf / s_hf
+
+    if structure < TIER_C_STRUCTURE:
+        subj = {"status": "fail", "detail": f"主体归一化后仍对不上（{structure:.2f}）：产品可能被换了"}
+    elif structure < TIER_A_STRUCTURE:
+        subj = {"status": "warn", "detail": f"主体只对上 {structure:.2f}：可能被重绘，需人看一眼"}
+    else:
+        subj = {"status": "pass", "detail": f"主体归一化比对一致（{structure:.2f}）"}
+
+    score = float(np.clip(0.8 * structure + 0.2 * min(sharp_ratio or 1.0, 1.0), 0, 1))
+    tier = "C" if structure < TIER_C_STRUCTURE else ("A" if structure >= TIER_A_STRUCTURE and
+                                                     (sharp_ratio is None or sharp_ratio >= TIER_SHARP)
+                                                     else "B")
+    reasons = [] if subj["status"] == "pass" else [subj["detail"]]
+    return {
+        "structure": round(structure, 3),
+        "spread": None,
+        "sharp": round(sharp_ratio, 3) if sharp_ratio is not None else None,
+        "scale": None,
+        "score": round(score, 3),
+        "tier": tier,
+        "reasons": reasons,
+        "mode": "reframed",
+        "subject_box": list(s_box),
+        "match_box": list(i_box),
+        "reliable": True,
+        "checks": {
+            "subject": subj,
+            "geometry": {"status": "skip", "detail": "重排类模板主动改画幅与主体占比，比例一项不适用"},
+            "label": lab,
+            "overall": {"status": subj["status"], "detail": f"归一化保真 {score:.3f}，档位 {tier}"},
+        },
+    }
+
+
 def assess(im: Image.Image, source: Image.Image, canvas: int = 320,
            ignore_spread: bool = False) -> dict:
     """评估成图 `im` 相对素材 `source` 的主体保真。
@@ -375,6 +546,10 @@ def assess(im: Image.Image, source: Image.Image, canvas: int = 320,
     img = _canvas(as_rgb(im), canvas)
 
     info = analyze_source(src)
+    # 重排类模板走归一化比对：先各取主体，再比内容，不受画幅与尺度影响
+    if ignore_spread:
+        return _assess_reframed(im, source, info)
+
     s_l = _luma(np.asarray(src, dtype=np.float32))
     s_e = _edge(s_l)
     i_l = _luma(np.asarray(img, dtype=np.float32))
@@ -395,6 +570,17 @@ def assess(im: Image.Image, source: Image.Image, canvas: int = 320,
             "reasons": reasons,
             "mode": "patch", "patches": len(all_scores),
             "subject_box": None, "match_box": None, "reliable": False,
+            # 多实例素材：只能证明"这个产品在画面里"，证明不了细节与比例
+            "checks": {
+                "subject": {"status": "unknown" if score >= PATCH_B["structure"] else "fail",
+                            "detail": (f"块匹配 {score:.2f}：产品特征在画面里，但素材为多实例场景，"
+                                       f"无法核验主体细节")
+                            if score >= PATCH_B["structure"] else
+                            f"产品特征未命中（{score:.2f}）：成图里可能不是这个产品"},
+                "geometry": {"status": "unknown", "detail": "多实例素材不测比例"},
+                "label": {"status": "unknown", "detail": "多实例素材不测标签区"},
+                "overall": {"status": "unknown", "detail": "只能确认产品在场，需人工核对细节"},
+            },
         }
 
     bx, by, bw, bh = info["box"]
@@ -407,7 +593,7 @@ def assess(im: Image.Image, source: Image.Image, canvas: int = 320,
     #    放开过——基准会把变形吸收一半、小模板天然高分，两个偏差一起把结果带沟里。
     H, W = i_e.shape
     best = (-2.0, None, None)
-    for s in _ISO_SCALES:
+    for s in (_ISO_SCALES_WIDE if ignore_spread else _ISO_SCALES):
         tw, th = int(tpl_e.shape[1] * s), int(tpl_e.shape[0] * s)
         if tw >= W or th >= H or tw < 6 or th < 6:
             continue
@@ -440,13 +626,88 @@ def assess(im: Image.Image, source: Image.Image, canvas: int = 320,
         sharp_ratio = img_sharp / src_sharp
 
     rel_scale = float(np.sqrt(tw * th) / np.sqrt(W * H))
+    # 注意传 s_e（整幅边缘图）而不是 tpl_e（已裁好的主体块）：
+    # 标签区要按素材框坐标切片，传裁切图会把偏移量加两遍
+    lab = _label_detail(s_e, i_e, (bx, by, bw, bh), (ax, ay, tw, th), soft)
     return _result(structure, spread_dev, sharp_ratio, info, "",
-                   box=(ax, ay, tw, th), rel_scale=rel_scale, wider=wider)
+                   box=(ax, ay, tw, th), rel_scale=rel_scale, wider=wider,
+                   ignore_spread=ignore_spread, label=lab)
+
+
+def _label_detail(tpl_e: np.ndarray, i_e: np.ndarray,
+                  src_box: tuple[int, int, int, int],
+                  match_box: tuple[int, int, int, int],
+                  soft: np.ndarray) -> dict:
+    """标签/细节区域：主体内部的边缘一致性。
+
+    为什么单独量：整幅的 `structure` 由大轮廓主导，标签糊了、Logo 被重绘成
+    别的字，整体相关照样很高（实测 0.8+）。而标签恰恰是**最不能错**的地方——
+    错一个字就是虚假宣传。所以把主体内部再裁出来单独比一次。
+
+    做法：素材取主体框内缩 12%，成图取匹配框内缩 12%，缩到同一尺寸比边缘相关。
+    内缩是为了避开边缘混色与背景过渡带，那部分本来就不可能一致。
+    """
+    bx, by, bw, bh = src_box
+    ax, ay, aw, ah = match_box
+    ix, iy = int(bw * 0.12), int(bh * 0.12)
+    t = tpl_e[by + iy: by + bh - iy, bx + ix: bx + bw - ix]
+    if t.size < 64:
+        return {"status": "unknown", "score": None, "detail": "主体过小，无法单独量标签区"}
+    h, w = t.shape
+    ci, cj = int(aw * 0.12), int(ah * 0.12)
+    crop = i_e[ay + cj: ay + ah - cj, ax + ci: ax + aw - ci]
+    if crop.size < 64:
+        return {"status": "unknown", "score": None, "detail": "匹配框过小，未量到标签区"}
+    hi, wi = crop.shape
+    if min(hi, wi) < 40:
+        # 成图里标签只有几十个像素，用来判断"字有没有被改"是不可能的。
+        # 与其给一个瞎猜的分数，不如明确说"看不出来"。
+        return {"status": "unknown", "score": None,
+                "detail": f"成图里标签区只有 {min(hi, wi)}px，看不清，需放大人工核对"}
+    img = _resize(crop, w, h)
+    # 软掩码的坐标系有两种：正常情况是**主体裁切图**（形状 = 框大小），
+    # 兜底情况下会被换成整幅（形状 = 整图）。按形状判断，别硬套一种。
+    if soft.shape == tpl_e.shape:
+        wt0 = soft[by + iy: by + bh - iy, bx + ix: bx + bw - ix]
+    else:
+        wt0 = soft[iy: bh - iy, ix: bw - ix]
+    if wt0.size < 16:
+        return {"status": "unknown", "score": None, "detail": "标签区掩码为空"}
+    wt = _resize(wt0, w, h)
+
+    # 统一缩到 64×64 再比。为什么不在原尺寸比：两侧的采样率往往不同
+    # （素材 900px、成图 2K 再缩到 320），同一块标签在两边的像素网格对不上，
+    # 直接相关会被重采样误差吃掉——实测"完全没改"的图只有 0.56。
+    # 缩到 64 后，"没改" 0.70、"换标签" 0.00、"糊掉" 0.46，分得开。
+    n = 64
+    a = _resize(t, n, n).reshape(-1).astype(np.float64)
+    b = _resize(crop, n, n).reshape(-1).astype(np.float64)
+    wv = _resize(wt0, n, n).reshape(-1).astype(np.float64)
+    mask = wv > 0.05
+    if mask.sum() < 64:
+        return {"status": "unknown", "score": None, "detail": "标签区掩码为空"}
+    a, b, wv = a[mask], b[mask], wv[mask]
+    am, bm = (a * wv).sum() / wv.sum(), (b * wv).sum() / wv.sum()
+    va = ((a - am) ** 2 * wv).sum()
+    vb = ((b - bm) ** 2 * wv).sum()
+    if va <= 1e-6 or vb <= 1e-6:
+        return {"status": "unknown", "score": None, "detail": "标签区过于平坦，相关度无意义"}
+    ncc = float(((a - am) * (b - bm) * wv).sum() / np.sqrt(va * vb))
+    score = round(float(np.clip(ncc, 0.0, 1.0)), 3)
+    _ = img
+    if score >= LABEL_A:
+        return {"status": "pass", "score": score, "detail": f"标签区边缘一致 {score:.2f}"}
+    if score >= LABEL_B:
+        return {"status": "warn", "score": score,
+                "detail": f"标签区边缘只对上 {score:.2f}：文字/Logo 可能被重绘，需放大核对"}
+    return {"status": "fail", "score": score,
+            "detail": f"标签区对不上（{score:.2f}）：标签内容很可能被改了"}
 
 
 def _result(structure: float, spread_dev: float | None, sharp_ratio: float | None,
             info: dict, note: str, box=None, rel_scale: float = 0.0,
-            wider: bool | None = None) -> dict:
+            wider: bool | None = None, ignore_spread: bool = False,
+            label: dict | None = None) -> dict:
     reasons: list[str] = []
 
     if structure < TIER_C_STRUCTURE:
@@ -488,6 +749,38 @@ def _result(structure: float, spread_dev: float | None, sharp_ratio: float | Non
         tier = "B"
         reasons.append("素材主体范围为估计值，建议人工确认")
 
+    # ── 分项检查：交付闸门按项判，不按总分 ──
+    if structure < TIER_C_STRUCTURE:
+        subj = {"status": "fail", "detail": f"主体结构对不上（{structure:.2f}），产品可能没进画面或被替换"}
+    elif structure < TIER_A_STRUCTURE:
+        subj = {"status": "warn", "detail": f"主体结构只对上 {structure:.2f}，可能被重绘"}
+    else:
+        subj = {"status": "pass", "detail": f"主体结构与素材一致（{structure:.2f}）"}
+    if not info.get("reliable"):
+        # 主体框是估的，"结构对上了"这件事本身就不太可信 —— 不能算 pass
+        subj = {"status": "unknown",
+                "detail": f"{subj['detail']}；但素材主体范围是估计值（{info.get('reason') or '多实例/低对比'}），结论要人看"}
+
+    if spread_dev is None:
+        geo = ({"status": "skip", "detail": "重排类模板主动改画幅与主体占比，比例一项不适用"}
+               if ignore_spread else
+               {"status": "unknown", "detail": "未测得铺展比（主体过小或素材无明确轮廓）"})
+    elif spread_dev > TIER_C_SPREAD:
+        axis = "纵向压扁" if wider is False else "横向拉长"
+        geo = {"status": "fail", "detail": f"{axis}约 {spread_dev * 100:.0f}%，明显超出可交付范围"}
+    elif spread_dev > TIER_A_SPREAD:
+        geo = {"status": "warn", "detail": f"比例偏差 {spread_dev * 100:.0f}%，肉眼不易判断"}
+    else:
+        geo = {"status": "pass", "detail": f"比例偏差 {spread_dev * 100:.0f}%，在容差内"}
+
+    lab = label or {"status": "unknown", "detail": "未量到标签区"}
+    if sharp_ratio is not None and sharp_ratio < TIER_SHARP:
+        lab = {"status": "fail",
+               "detail": f"产品区域清晰度只有素材的 {sharp_ratio * 100:.0f}%，标签已不可读"}
+    overall = {"status": subj["status"] if subj["status"] == "fail" else
+               ("fail" if geo["status"] == "fail" else "pass"),
+               "detail": f"保真 {round(score, 3)}，档位 {tier}"}
+
     return {
         "structure": round(structure, 3),
         "spread": round(spread_dev, 3) if spread_dev is not None else None,
@@ -500,6 +793,7 @@ def _result(structure: float, spread_dev: float | None, sharp_ratio: float | Non
         "subject_box": info.get("box"),
         "match_box": box,
         "reliable": bool(info.get("reliable")),
+        "checks": {"subject": subj, "geometry": geo, "label": lab, "overall": overall},
     }
 
 

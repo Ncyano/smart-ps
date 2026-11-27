@@ -27,6 +27,12 @@ class Template:
     reframes: bool = False
     # 需要用户填的文案字段
     copy_fields: list[str] = field(default_factory=list)
+    # 是否需要额外输入（before / after / scene / corners / evidence）。
+    # 界面按这个列表显示对应的上传位，缺了由模板自己判 fail。
+    inputs: list[str] = field(default_factory=list)
+    # True = 不调生成模型，纯确定性合成（专利证据图、表格、成对对比）。
+    # 这类物料本来就不该让模型画内容，命中的是"不编造数据"这条铁律。
+    compose: bool = False
     # 确定性后处理：im + copy + 上下文 → (im, 版式报告)
     apply: Callable[[Image.Image, dict, dict], tuple[Image.Image, dict]] | None = None
 
@@ -42,6 +48,8 @@ class Template:
             "export": self.export,
             "canvas": list(self.canvas) if self.canvas else None,
             "copy_fields": self.copy_fields,
+            "inputs": self.inputs,
+            "compose": self.compose,
             "reframes": self.reframes,
             "has_layout": self.apply is not None,
         }

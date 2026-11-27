@@ -14,10 +14,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from PIL import Image
+
 from . import config as cfgmod
+from . import gate
 from . import jobs
 from . import rights
+from . import scenes
 from . import store
+from . import taxonomy
 from . import templates
 from .config import DATA_DIR, WEB_DIR
 from .engines.base import EngineError
@@ -87,6 +92,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/templates":
             return self._json({"templates": [t.to_dict() for t in templates.ALL]})
 
+        if path == "/api/taxonomy":
+            return self._json(taxonomy.load().to_dict())
+
         if path == "/api/batches":
             return self._json({"batches": jobs.list_recent()})
 
@@ -134,6 +142,25 @@ class Handler(BaseHTTPRequestHandler):
             cfgmod.save(patch)
             return self._json({"ok": True, "config": cfgmod.masked(cfgmod.load())})
 
+        if path == "/api/scenes/detect":
+            # 贴屏校准第一步：传一张场景照，回四角 + 置信度。
+            # 置信度不足时前端把四角画出来让人拖，不要自动出图。
+            payload_url = str(payload.get("data_url") or "")
+            if not payload_url.startswith("data:"):
+                return self._err("需要 data_url（data:image/...;base64,...）", 422)
+            try:
+                p = store.save_payload(payload_url, str(payload.get("name") or "scene.png"),
+                                       DATA_DIR / "scenes" / "incoming")
+                with Image.open(p) as im:
+                    cal = scenes.load(im) or scenes.detect(im)
+                    if cal.method == "auto" and not cal.needs_manual:
+                        scenes.save(im, cal)
+                    w, h = im.size
+            except Exception as exc:  # noqa: BLE001
+                return self._err(f"场景解析失败：{exc}", 422)
+            return self._json({"calibration": cal.to_dict(), "size": [w, h],
+                               "min_confidence": scenes.MIN_CONFIDENCE})
+
         if path == "/api/batches":
             try:
                 req = BatchRequest(**payload)
@@ -170,6 +197,13 @@ class Handler(BaseHTTPRequestHandler):
             if len(parts) == 2 and parts[1] == "export":
                 return self._export(batch, payload)
 
+            # 手动重试：有检查点就续跑，不重复付费
+            if len(parts) == 2 and parts[1] == "retry":
+                try:
+                    return self._json(jobs.retry(parts[0]))
+                except ValueError as exc:
+                    return self._err(str(exc), 422)
+
             # 补声明素材授权：老批次或忘记填的，导出前后都能补，不必重新生成
             if len(parts) == 2 and parts[1] == "rights":
                 declared = str(payload.get("rights") or "").strip()
@@ -205,8 +239,15 @@ class Handler(BaseHTTPRequestHandler):
         elif action == "reset":
             target["chosen"] = False
             target["review"] = "pending"
+        elif action in ("confirm", "unconfirm"):
+            # 主体/内容人工确认。这是唯一能把"待人工"翻成"可交付"的动作，
+            # 所以必须记人和时间——不记名的确认等于没确认。
+            target["subject_confirmed"] = action == "confirm"
+            target["subject_confirmed_by"] = str(payload.get("by") or "审核人") if action == "confirm" else ""
+            target["subject_confirmed_at"] = datetime.now().isoformat(timespec="seconds") \
+                if action == "confirm" else ""
         else:
-            return self._err("action 只能是 choose / reject / reset", 422)
+            return self._err("action 只能是 choose / reject / reset / confirm / unconfirm", 422)
 
         if note:
             target["note"] = note
@@ -216,8 +257,11 @@ class Handler(BaseHTTPRequestHandler):
         batch["review_state"] = {
             "chosen": chosen,
             "rejected": [c["index"] for c in batch["candidates"] if c.get("review") == "rejected"],
+            "confirmed": [c["index"] for c in batch["candidates"] if c.get("subject_confirmed")],
             "updated_at": datetime.now().isoformat(timespec="seconds"),
         }
+        # 确认/淘汰会改变闸门结论，必须重算一次，不能留着旧结论
+        gate.apply(batch)
         store.save_batch(batch)
         return self._json(batch)
 
@@ -225,11 +269,20 @@ class Handler(BaseHTTPRequestHandler):
     def _export(self, batch: dict, payload: dict) -> None:
         from .export import export_batch  # 局部导入：没导出需求时不加载
 
+        formal = bool(payload.get("formal"))
+        if formal:
+            # 正式交付：必须是"授权 ok + 有候选全项通过"。这条不能被任何分数绕过。
+            ok, why = gate.formal_ready(batch)
+            if not ok:
+                return self._err(f"未通过正式交付闸门：{why}", 409)
+
         indexes = payload.get("indexes")
         if not indexes:
-            indexes = [c["index"] for c in batch.get("candidates", []) if c.get("chosen")]
+            keep = ("deliverable",) if formal else ("deliverable", "manual", "internal_only")
+            indexes = [c["index"] for c in batch.get("candidates", [])
+                       if c.get("chosen") and (c.get("delivery") or {}).get("status") in keep]
         if not indexes:
-            return self._err("没有指定候选，也没有已选定的候选", 422)
+            return self._err("没有指定候选，也没有已选定且通过闸门的候选", 422)
         try:
             files = export_batch(
                 batch,
@@ -237,14 +290,17 @@ class Handler(BaseHTTPRequestHandler):
                 size=payload.get("size"),
                 fmt=str(payload.get("fmt") or "png"),
                 quality=int(payload.get("quality") or 95),
+                formal=formal,
             )
         except ValueError as exc:
             return self._err(str(exc), 422)
         except Exception as exc:  # noqa: BLE001
             traceback.print_exc()
             return self._err(f"导出失败：{exc}", 500)
-        gate = rights.gate(batch)
-        return self._json({"batch": batch["id"], "files": files, "rights": gate})
+        gate_result = rights.gate(batch)
+        return self._json({"batch": batch["id"], "files": files, "rights": gate_result,
+                           "formal": formal,
+                           "delivery": batch.get("delivery")})
 
 
 def main() -> None:
@@ -261,8 +317,10 @@ def main() -> None:
     print(f"  配置：{cfgmod.CONFIG_PATH}")
     print(f"  数据：{DATA_DIR}")
     print("  API 填入口：界面右上角「设置」，或编辑上面这个 config.toml")
-    if fixed:
-        print(f"  已把 {fixed} 个中断任务标记为失败")
+    if fixed.get("resumed"):
+        print(f"  已从检查点续跑 {fixed['resumed']} 个中断任务（不重复扣费）")
+    if fixed.get("failed"):
+        print(f"  已把 {fixed['failed']} 个无法续跑的任务标记为失败")
     print("=" * 62)
     try:
         srv.serve_forever()

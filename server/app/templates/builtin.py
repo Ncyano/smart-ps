@@ -183,7 +183,12 @@ def _white_bg(im: Image.Image, copy: dict, ctx: dict) -> tuple[Image.Image, dict
     # （踩坑库 A3 的原坑）。白底只需要"找到外框 + 重新算留白"，不碰像素。
     if mean_l >= 246:
         a = np.asarray(rgb, dtype=np.float32)
-        nonwhite = a.min(axis=2) < 244
+        # 阈值 240 而不是 244：白底图底下常有一层很淡的投影（实测 238），
+        # 按 244 判会把投影算进主体，裁出来的框比瓶身宽 13%，
+        # 后面按框缩放就把主体横向拉开了——保真度量随即报"结构只对上 0.50"。
+        nonwhite = a.min(axis=2) < 240
+        if nonwhite.mean() < 0.005:      # 产品本身很浅，退回宽松阈值
+            nonwhite = a.min(axis=2) < 246
         ys, xs = np.nonzero(nonwhite)
         if xs.size < 16:
             rep.fail("白底但没找到产品（非白像素过少）")

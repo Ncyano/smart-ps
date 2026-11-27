@@ -48,7 +48,7 @@
     border-radius:8px;padding:6px 12px;cursor:pointer;font:inherit}
   button.ghost:hover{color:var(--text);border-color:var(--accent)}
   .note{font-size:12px;color:var(--dim);margin-top:10px;line-height:1.5}
-  .results{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+  .results{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px}
   .cand{background:var(--panel2);border:1px solid var(--line);border-radius:10px;overflow:hidden}
   .cand.chosen{border-color:var(--ok);box-shadow:0 0 0 1px var(--ok) inset}
   .cand img{width:100%;display:block;background:#000;max-height:430px;object-fit:contain}
@@ -81,6 +81,16 @@
   .exportbar button.primary{width:auto;margin:0;padding:7px 16px;font-size:13px}
   .progressbox{padding:60px 24px;border:1px dashed var(--line);border-radius:12px;max-width:520px;
     margin:0 auto}
+  .chkbox{margin-top:8px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+    background:rgba(255,255,255,.02)}
+  .chkbox summary{cursor:pointer;font-size:12px;color:var(--dim)}
+  .chk{display:grid;grid-template-columns:14px 84px 1fr;gap:6px;align-items:start;
+    font-size:12px;padding:4px 0;border-top:1px dashed rgba(255,255,255,.05)}
+  .chk:first-of-type{border-top:0}
+  .chk-i{font-weight:700;text-align:center}
+  .chk-i.ok{color:var(--ok)} .chk-i.warn{color:var(--warn)} .chk-i.bad{color:var(--bad)}
+  .chk-l{color:var(--text)} .chk-d{color:var(--dim)}
+  .badge.bad{color:var(--bad);border-color:rgba(239,91,91,.4)}
 </style>
 </head>
 <body>
@@ -114,10 +124,9 @@
     <label class="f" style="margin-top:12px">⑤ 产品品类</label>
     <select id="category">
       <option value="auto" selected>自动识别（推荐）</option>
-      <option value="skincare">涂抹类化妆品（气垫 / 面霜 / 精华）</option>
-      <option value="oral">可食用（胶囊 / 口服液 / 粉剂）</option>
     </select>
-    <div class="note">文案说「每天一粒」、产品却是气垫霜时，会在花额度之前直接拦下。</div>
+    <div class="note">文案说「每天一粒」、产品却是气垫霜时，会在花额度之前直接拦下。
+      选项来自 <code>config/taxonomy.toml</code>，加品类改配置即可。</div>
 
     <label class="f" style="margin-top:12px">⑥ 素材授权</label>
     <select id="rights">
@@ -127,17 +136,18 @@
       <option value="third_party">第三方品牌素材，未授权（仅内部）</option>
       <option value="sample">示例 / 演示素材（仅内部）</option>
     </select>
-    <div class="note">选了「仅内部」的，导出目录会自动带一份说明文件，避免误当正式物料发出去。</div>
+    <div class="note">选了「仅内部」的，导出目录会自动带说明文件与水印副本，避免误当正式物料发出去。</div>
 
-    <div id="copyBox" style="display:none">
-      <label class="f" style="margin-top:10px">标题</label>
-      <input id="cpTitle" type="text" placeholder="例：奶油肌气垫 遮瑕不卡粉" />
-      <label class="f" style="margin-top:8px">副标题</label>
-      <input id="cpSub" type="text" placeholder="例：轻薄贴肤 · 持妆一整天" />
-      <label class="f" style="margin-top:8px">卖点（每行一条，最多 3 条）</label>
-      <textarea id="cpPoints" placeholder="一层盖住痘印与红血丝&#10;微米级粉体贴肤，干皮也不卡纹&#10;含保湿成分，补妆同时养肤"></textarea>
-      <label class="f" style="margin-top:8px">角标</label>
-      <input id="cpTag" type="text" placeholder="例：油皮亲妈（可留空）" />
+    <div id="tplInputs" style="display:none"></div>
+
+    <div id="copyBox" style="display:none"></div>
+
+    <div id="claimsBox" style="display:none">
+      <label class="f" style="margin-top:14px">数据来源（价格 / 含量 / 专利号 / 百分比）</label>
+      <div id="claimRows"></div>
+      <button class="ghost mini" type="button" onclick="addClaimRow()" style="margin-top:8px">+ 加一条来源</button>
+      <div class="note">文案里出现的每个数字都要能对上一条来源。对不上的会标成「待人工」，
+        不会自动算通过——排版准确不代表数字真实。</div>
     </div>
 
     <div class="row" style="margin-top:12px">
@@ -281,15 +291,15 @@ $("btnSave").onclick = async () => {
 // ─── 生成 ───
 const TIER_TEXT = { A: "A 可信", B: "B 存疑", C: "C 不可用" };
 const TIER_CLS = { A: "ok", B: "warn", C: "warn" };
+const ST_CLS = { deliverable: "ok", manual: "warn", internal_only: "warn", rejected: "bad" };
+const CH_CLS = { pass: "ok", warn: "warn", unknown: "warn", fail: "bad", skip: "" };
+const CH_ICON = { pass: "✓", warn: "!", unknown: "?", fail: "✕", skip: "–" };
 
 function verdictBadge(c) {
-  const tier = c.tier || (c.verdict === "可交付" ? "A" : "B");
-  const cls = TIER_CLS[tier] || "warn";
-  return `<span class="badge ${cls}" title="${
-    tier === "A" ? "结构、比例、清晰度三项都过关，可直接用"
-      : tier === "B" ? "有一项存疑，值得人看一眼"
-      : "有硬伤（产品不在/比例被改/糊了）"
-  }">${TIER_TEXT[tier] || c.verdict}</span>`;
+  const d = c.delivery || {};
+  const st = d.status || "manual";
+  return `<span class="badge ${ST_CLS[st] || "warn"}" title="${esc(d.reason || "")}">
+    ${esc(d.label || c.verdict || "待人工")}</span>`;
 }
 
 function semanticBadge(c) {
@@ -306,79 +316,122 @@ function layoutBadge(c) {
   if (!l) return "";
   return l.ok
     ? '<span class="badge ok">版式 OK</span>'
-    : '<span class="badge warn" title="' + (l.reasons || []).join("；") + '">版式异常</span>';
+    : '<span class="badge warn" title="' + esc((l.reasons || []).join("；")) + '">版式异常</span>';
 }
 
 function scoreLine(c) {
   const s = c.scores || {};
-  const f = v => (v === null || v === undefined) ? "—" : v;
-  // 比例在 15% 以内不下结论（调色本身就能漂 10% 以上），显示"正常"而不是一个假精确的数字
+  const v = x => (x === null || x === undefined) ? "—" : x;
   let sp;
-  if (s.spread === null || s.spread === undefined) sp = "未校验";
+  if (s.spread === null || s.spread === undefined) sp = "不适用";
   else if (s.spread <= 0.15) sp = "正常";
   else sp = `±${(s.spread * 100).toFixed(0)}%`;
-  const sh = (s.sharp === null || s.sharp === undefined) ? "未校验" : f(s.sharp);
-  const parts = [`结构 ${f(s.structure)}`, `比例 ${sp}`, `清晰 ${sh}`];
-  if (s.style !== undefined) parts.push(`风格 ${s.style}`);
+  const parts = [`结构 ${v(s.structure)}`, `比例 ${sp}`, `清晰 ${v(s.sharp)}`];
+  if (s.style !== null && s.style !== undefined) parts.push(`风格 ${s.style}`);
   return `<span class="badge">${parts.join(" · ")}</span>`;
 }
 
+// 逐项检查：这是"为什么待人工"的正文。分数只是排序，结论看这些项。
+function checksBlock(c) {
+  const d = c.delivery;
+  if (!d) return "";
+  const rows = (d.checks || []).map(ch => `
+    <div class="chk">
+      <span class="chk-i ${CH_CLS[ch.status] || ""}">${CH_ICON[ch.status] || "?"}</span>
+      <span class="chk-l">${esc(ch.label)}</span>
+      <span class="chk-d">${esc(ch.detail || "")}</span>
+    </div>`).join("");
+  const todo = (d.checks || []).filter(ch => (ch.status === "unknown" || ch.status === "warn")
+    && ch.action);
+  const todoHtml = todo.length
+    ? `<div class="note" style="margin-top:6px">要做的事：<br>${
+        todo.map(ch => "· " + esc(ch.label) + "：" + esc(ch.action)).join("<br>")}</div>`
+    : "";
+  return `<details class="chkbox" ${d.status !== "deliverable" ? "open" : ""}>
+      <summary>逐项检查 ${(d.checks || []).filter(x => x.status === "pass").length}/${
+        (d.checks || []).length} 通过${d.status === "deliverable" ? "" : " · 为什么待人工"}</summary>
+      ${rows}${todoHtml}
+    </details>`;
+}
+
+function sourcesBlock(b) {
+  const a = b.claims_audit || {};
+  const items = a.data_items || [];
+  if (!items.length && !(a.findings || []).some(f => f.kind !== "data")) return "";
+  const rows = items.map(d => {
+    const ok = d.verified;
+    return `<div class="chk">
+      <span class="chk-i ${ok ? "ok" : "warn"}">${ok ? "✓" : "?"}</span>
+      <span class="chk-l">${esc(d.label)} ${esc(d.text)}</span>
+      <span class="chk-d">${ok ? esc(d.source || "已声明") : "没有来源，需补录后再交付"}</span>
+    </div>`;
+  }).join("");
+  const warn = (a.findings || []).filter(f => f.kind !== "data")
+    .map(f => `<div class="note" style="color:var(--warn)">· ${esc(f.rule)}「${esc(f.text)}」</div>`)
+    .join("");
+  return `<details class="chkbox"><summary>数据与合规来源（${items.length} 项可核数字）</summary>
+    ${rows}${warn}</details>`;
+}
+
 function renderBatch(b) {
-  const cost = b.cost_cny > 0 ? `${b.cost_cny.toFixed(2)} 元` : "0 元（本地）";
+  const cost = b.cost_cny > 0 ? `${b.cost_cny.toFixed(2)} 元` : "0 元（本地/合成）";
   const produced = b.produced ?? b.candidates.length;
   const requested = b.requested ?? b.candidates.length;
   const partial = produced < requested
     ? `<div class="note" style="color:var(--warn)">要求 ${requested} 张，实际产出 ${produced} 张${
         (b.gen_errors || []).length ? "：" + b.gen_errors.join("；") : ""}</div>`
     : "";
-  const t = b.tiers;
-  const tierLine = t
-    ? `<div class="note">分档：A 可信 ${t.A} · B 存疑 ${t.B} · C 不可用 ${t.C}　
-         <span style="opacity:.65">（A=三项都过关；B=值得人看一眼；C=有硬伤）</span></div>`
-    : "";
-  // 品类校验：只在"没校验"或"有提醒"时出现，正常一致就不占地方
+
+  const dv = b.delivery || {};
+  const sum = dv.summary || {};
+  const dvLine = `<div class="note">
+    交付：<b>${sum.deliverable || 0}</b> 可交付 · ${sum.manual || 0} 待人工 ·
+    ${sum.rejected || 0} 不可用 · ${sum.internal_only || 0} 仅内部　
+    <span style="opacity:.65">（全部检查项有证据通过才算可交付；分数不能抵消）</span></div>`;
+
   const cat = b.category_check;
-  const catLabel = { skincare: "化妆品", oral: "可食用", unknown: "未定" };
-  const catLine = (cat && cat.copy_category && cat.copy_category !== "unknown")
-    ? `<div class="note"${cat.ok ? "" : ' style="color:var(--warn)"'}>
-         品类：文案判为${catLabel[cat.copy_category] || cat.copy_category} · 素材判为${
-           catLabel[cat.image_category] || cat.image_category}（依据：${cat.source}）${
-           (cat.reasons || []).length ? "　" + cat.reasons[0] : ""}</div>`
+  const catName = id => (TAX.find(p => p.id === id) || {}).label || id;
+  const catLine = (cat && cat.status !== "skipped")
+    ? `<div class="note"${cat.status === "conflict" ? ' style="color:var(--bad)"' : ""}>
+        品类：文案判为${esc(catName(cat.copy_category))} · 素材判为${esc(catName(cat.image_category))}
+        （依据：${esc(cat.source)}）${
+          cat.status === "unchecked" ? `　<span style="color:var(--warn)">未校验，不算通过</span>` : ""}</div>`
     : "";
-  const sem = b.semantic;
-  // 授权：可正式交付就用淡色一行；仅内部/未声明用警告色，且说清后果
+
   const rt = b.rights;
   const rightsLine = !rt ? "" : (rt.level === "ok"
-    ? `<div class="note" style="opacity:.7">授权：${rt.label}</div>`
-    : `<div class="note" style="color:var(--warn)"><b>授权：${rt.label}</b>　${rt.note}${
-        rt.level === "internal" ? "　导出目录会自动写入「仅内部参考」说明" : ""}</div>`);
+    ? `<div class="note" style="opacity:.7">授权：${esc(rt.label)}</div>`
+    : `<div class="note" style="color:var(--warn)"><b>授权：${esc(rt.label)}</b>　${esc(rt.note)}${
+        rt.level === "internal" ? "　导出会带「仅内部参考」说明与带水印副本" : ""}</div>`);
+
+  const sem = b.semantic;
   const semLine = sem
     ? (sem.checked
-        ? `<div class="note">语义校验：已用 ${sem.model} 判「同一款产品 / 文字乱码 / 比例」</div>`
-        : `<div class="note" style="color:var(--warn)">语义未校验：${sem.reason || "未启用"}　
-             <span style="opacity:.65">（「是不是同一款产品」「文字有没有乱码」目前只能靠人）</span></div>`)
+        ? `<div class="note">语义校验：已用 ${esc(sem.model)} 判「同一款产品 / 文字乱码」</div>`
+        : `<div class="note" style="color:var(--warn)">语义未校验：${esc(sem.reason || "未启用")}</div>`)
     : "";
+
   const tplName = (TPLS.find(t => t.id === b.template) || {}).name || b.template || "";
-  const tplLine = (b.template && b.template !== "scene")
-    ? `<div class="note">工艺模板：${tplName} v${b.template_version}　导出默认 ${b.template_export}</div>`
-    : "";
+  const tplLine = `<div class="note">工艺模板：${esc(tplName)} v${b.template_version || 1}
+    · 导出默认 ${esc(b.template_export || "original")}${
+      b.template_compose ? " · 确定性合成" : ""}
+    · 引擎 ${esc(b.engine)}</div>`;
+
   const head = `
     <div class="kv">
       <div><b>${b.candidates.length}</b><span>候选</span></div>
       <div><b>${cost}</b><span>成本</span></div>
       <div><b>${b.elapsed_s}s</b><span>耗时</span></div>
-      <div><b>${b.engine}</b><span>引擎</span></div>
+      <div><b>${esc(b.engine)}</b><span>引擎</span></div>
     </div>
-    ${tplLine}
-    ${tierLine}
-    ${catLine}
-    ${rightsLine}
-    ${semLine}
-    ${b.engine_note ? `<div class="note" style="color:var(--warn)">${b.engine_note}</div>` : ""}
-    ${partial}
-  `;
+    ${tplLine}${dvLine}${catLine}${rightsLine}${semLine}
+    ${b.engine_note ? `<div class="note" style="color:var(--warn)">${esc(b.engine_note)}</div>` : ""}
+    ${partial}`;
 
-  const grid = b.candidates.map(c => `
+  const grid = b.candidates.map(c => {
+    const d = c.delivery || {};
+    const canConfirm = d.status !== "internal_only";
+    return `
     <div class="cand ${c.chosen ? "chosen" : ""}" style="${c.review === "rejected" ? "opacity:.45" : ""}">
       <img src="${c.final_url}" alt="候选 ${c.index}" />
       <div class="body">
@@ -387,29 +440,39 @@ function renderBatch(b) {
           ${c.suggested ? '<span class="badge">推荐</span>' : ""}
           ${c.chosen ? '<span class="badge ok">已选</span>' : ""}
           ${c.review === "rejected" ? '<span class="badge warn">已淘汰</span>' : ""}
+          ${c.subject_confirmed ? '<span class="badge ok">已核对</span>' : ""}
           ${semanticBadge(c)}
           ${layoutBadge(c)}
-          <span class="badge">保真 ${c.scores.fidelity} · 风格 ${c.scores.style} · 质量 ${c.scores.quality}</span>
         </div>
         <div class="badges">${scoreLine(c)}</div>
-        ${c.reasons && c.reasons.length ? `<div class="note" style="color:var(--warn)">${c.reasons.join("；")}</div>` : ""}
+        ${(c.reasons && c.reasons.length) ? `<div class="note" style="color:var(--warn)">${esc(c.reasons.join("；"))}</div>` : ""}
+        ${checksBlock(c)}
         <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+          ${canConfirm ? `<button class="ghost mini" onclick="review('${b.id}', ${c.index}, '${c.subject_confirmed ? "unconfirm" : "confirm"}')">
+            ${c.subject_confirmed ? "取消核对" : "内容已核对"}</button>` : ""}
           <button class="ghost mini" onclick="review('${b.id}', ${c.index}, 'choose')">选中</button>
           <button class="ghost mini" onclick="review('${b.id}', ${c.index}, 'reject')">淘汰</button>
           <button class="ghost mini" onclick="review('${b.id}', ${c.index}, 'reset')">复位</button>
           <a href="${c.final_url}" download>下载</a>
-          <a href="${c.raw_url}" download>原始输出</a>
         </div>
       </div>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 
   const prof = b.style_profile;
-  const pack = b.recipe.refs.map(r => `· [${r.role}] ${r.label}`).join("<br>");
+  const pack = (b.recipe.refs || []).map(r => `· [${r.role}] ${r.label}`).join("<br>");
   const chosenCount = b.candidates.filter(c => c.chosen).length;
+  // 正式导出要求：整批允许正式交付 **且** 你勾选的每一张都是可交付。
+  // 只看批次汇总会漏掉"选中的正好是待人工那张"。
+  const chosenCands = b.candidates.filter(c => c.chosen);
+  const formalReady = !!(b.delivery || {}).formal_ready &&
+    chosenCands.length > 0 &&
+    chosenCands.every(c => (c.delivery || {}).status === "deliverable");
 
   $("result").innerHTML = `
     ${head}
     <div class="results" style="margin-top:14px">${grid}</div>
+    ${sourcesBlock(b)}
     <div class="exportbar">
       <span style="color:var(--dim);font-size:12px">已选 ${chosenCount} 张</span>
       <select id="expSize">
@@ -419,17 +482,23 @@ function renderBatch(b) {
         <option value="story_1080x1920">竖版 1080×1920</option>
         <option value="banner_1920x640">横版 1920×640</option>
       </select>
-      <button class="primary" onclick="doExport('${b.id}')"
-        ${chosenCount ? "" : "disabled title='先选中至少一张'"}>导出已选</button>
+      <button class="primary" onclick="doExport('${b.id}', true)"
+        ${(chosenCount && formalReady) ? "" : "disabled"}
+        title="${formalReady ? "正式交付"
+          : "要求：授权 ok + 选中的每一张都全项通过且已人工核对"}">
+        正式导出</button>
+      <button class="ghost" onclick="doExport('${b.id}', false)"
+        ${chosenCount ? "" : "disabled"}>内部参考导出</button>
       <span id="expMsg" style="font-size:12px;color:var(--dim)"></span>
     </div>
     <details style="margin-top:16px">
       <summary style="cursor:pointer;color:var(--dim);font-size:12px">产线细节（参考图打包 / 提示词 / StyleProfile / 素材评分）</summary>
       <div class="note" style="margin-top:10px"><b>参考图打包</b><br>${pack || "（无）"}</div>
-      <div class="note"><b>提示词</b><pre>${b.recipe.prompt}</pre></div>
-      <div class="note"><b>负向</b><pre>${b.recipe.negative}</pre></div>
-      <div class="note"><b>StyleProfile</b><pre>${JSON.stringify(prof, null, 2)}</pre></div>
-      <div class="note"><b>素材评分</b><pre>${b.materials.map(m => `${m.name}  质量 ${m.quality} / 锐度 ${m.sharpness} / 曝光 ${m.exposure}`).join("\n")}</pre></div>
+      <div class="note"><b>提示词</b><pre>${esc(b.recipe.prompt)}</pre></div>
+      <div class="note"><b>负向</b><pre>${esc(b.recipe.negative)}</pre></div>
+      <div class="note"><b>StyleProfile</b><pre>${esc(JSON.stringify(prof, null, 2))}</pre></div>
+      <div class="note"><b>素材评分</b><pre>${b.materials.map(m =>
+        `${m.name}  质量 ${m.quality} / 锐度 ${m.sharpness} / 曝光 ${m.exposure}`).join("\n")}</pre></div>
     </details>
   `;
 }
@@ -440,7 +509,7 @@ async function review(batchId, index, action) {
     const res = await fetch(`/api/batches/${batchId}/review`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ index, action })
+      body: JSON.stringify({ index, action, by: "界面" })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "操作失败");
@@ -451,24 +520,27 @@ async function review(batchId, index, action) {
 }
 
 // ─── 导出 ───
-async function doExport(batchId) {
+async function doExport(batchId, formal) {
   const msg = $("expMsg");
-  msg.textContent = "导出中…";
+  msg.textContent = formal ? "正式导出中…" : "内部参考导出中…";
   try {
     const res = await fetch(`/api/batches/${batchId}/export`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ size: $("expSize").value })
+      body: JSON.stringify({ size: $("expSize").value, formal: !!formal })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "导出失败");
     const links = data.files.map(f =>
       `<a href="${f.url}" download target="_blank">#${f.index} ${f.size.join("×")}</a>`).join("　");
+    const prev = data.files.filter(f => f.preview_url)
+      .map(f => `<a href="${f.preview_url}" target="_blank">#${f.index} 水印副本</a>`).join("　");
     const warn = (data.rights && data.rights.warning)
-      ? `<div style="color:var(--warn);margin-top:8px">${data.rights.warning}</div>` : "";
-    msg.innerHTML = "已导出：" + links + warn;
+      ? `<div style="color:var(--warn);margin-top:8px">${esc(data.rights.warning)}</div>` : "";
+    msg.innerHTML = (formal ? "已正式导出：" : "已导出（内部参考）：") + links +
+      (prev ? "<br>预览：" + prev : "") + warn;
   } catch (e) {
-    msg.textContent = e.message;
+    msg.innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`;
   }
 }
 
@@ -521,7 +593,7 @@ $("btnRun").onclick = async () => {
     const res = await fetch("/api/batches", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: JSON.stringify(Object.assign({
         instruction: $("instruction").value,
         engine: $("engine").value || null,
         candidates: Number($("cands").value),
@@ -529,12 +601,19 @@ $("btnRun").onclick = async () => {
         category: $("category").value || "auto",
         rights: $("rights").value || "unknown",
         copy: currentCopy(),
+        claims: currentClaims(),
+        corners: state2.corners || null,
         materials: state.materials,
-        exemplars: state.exemplars
-      })
+        exemplars: state.exemplars,
+        // 幂等键：同一个"意图"只跑一次。提交成功后换新的，
+        // 这样连点两下不会扣两次钱，但改完文案再提交是新任务。
+        request_id: (state2.requestId ||= "ui-" + Date.now() + "-" +
+          Math.random().toString(36).slice(2, 8))
+      }, state2.extra))
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "生成失败");
+    state2.requestId = "";
     await pollJob(data.id);
   } catch (e) {
     $("result").innerHTML = `<div class="empty" style="color:var(--bad)">${e.message}</div>`;
@@ -546,30 +625,228 @@ $("btnRun").onclick = async () => {
 
 // ─── 工艺模板 ───
 let TPLS = [];
+let TAX = [];
+const state2 = { extra: {}, corners: null, sceneUrl: "", sceneSize: null };
+
+const FIELD_LABEL = {
+  title: "标题", subtitle: "副标题", points: "卖点（每行一条，最多 3 条）", tag: "角标",
+  price_now: "现价（必填）", price_was: "原价", unit: "单位", period: "活动 / 有效期",
+  columns: "表头（用 | 分隔）", rows: "数据行（每行一条，列用 | 分隔）",
+  footnote: "脚注 / 免责说明", patent_no: "专利 / 证书号", issuer: "发证机构",
+  evidence: "是否真实拍摄（填 real 才是实拍，留空=示意图）"
+};
+const FIELD_HINT = {
+  price_now: "例：199（必须能在下面绑一条来源）",
+  columns: "例：项目 | 本品 | A 牌 | B 牌",
+  rows: "例：含量 | 1000mg | 800mg | 500mg",
+  patent_no: "例：ZL2023 1 0123456.7",
+  evidence: "不填就是「示意图：效果因人而异」，填 real 才标「真实拍摄」"
+};
+const INPUT_LABEL = {
+  before: "使用前原图（成对模板必填）", after: "使用后原图（不传就用本批生成的）",
+  scene: "真实场景照（贴屏用）", evidence: "证书 / 报告原件扫描件（必填）"
+};
 
 function currentTpl() {
   return TPLS.find(t => t.id === ($("template").value || "scene")) || TPLS[0] || null;
 }
 
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"]/g, c =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+// 动态渲染模板需要的文案字段：每类物料的字段不同，写死在 HTML 里迟早对不上
+function renderCopyFields(t) {
+  const box = $("copyBox");
+  const fields = t.copy_fields || [];
+  if (!fields.length) { box.style.display = "none"; box.innerHTML = ""; return; }
+  box.style.display = "block";
+  box.innerHTML = fields.map(f => {
+    const label = FIELD_LABEL[f] || f;
+    const multi = (f === "points" || f === "rows" || f === "columns");
+    const id = `cp_${f}`;
+    // 例子只放一处：输入框用 placeholder，多行框用下方 hint（textarea 的 placeholder 太挤）
+    const tag = multi
+      ? `<textarea id="${id}" placeholder="${esc(FIELD_HINT[f] || "")}"></textarea>
+         ${FIELD_HINT[f] ? `<div class="hint">${esc(FIELD_HINT[f])}</div>` : ""}`
+      : `<input id="${id}" type="text" placeholder="${esc(FIELD_HINT[f] || "")}" />`;
+    return `<label class="f" style="margin-top:10px">${esc(label)}</label>${tag}`;
+  }).join("");
+}
+
+// 模板的额外输入：成对对比要 before/after，贴屏要 scene + 四角，证据图要扫描件
+function renderTplInputs(t) {
+  const box = $("tplInputs");
+  const inputs = t.inputs || [];
+  state2.corners = null;
+  state2.sceneUrl = "";
+  if (!inputs.length) { box.style.display = "none"; box.innerHTML = ""; return; }
+  box.style.display = "block";
+  let html = `<label class="f" style="margin-top:14px">⑦ 这类物料需要的额外输入</label>`;
+  for (const key of inputs) {
+    if (key === "corners") continue;
+    html += `<div class="drop" id="drop_${key}" style="margin-top:8px;padding:10px">
+        ${esc(INPUT_LABEL[key] || key)}</div>
+      <input type="file" id="file_${key}" accept="image/*" hidden />
+      <div class="thumbs" id="th_${key}"></div>`;
+  }
+  if (inputs.includes("corners")) {
+    html += `<div class="note" style="margin-top:10px">贴屏需要四角定位。先传场景照，系统会自动找；
+      找不到或不准时，把四角坐标改一下再点「应用校准」。</div>
+      <canvas id="cornerCanvas" style="width:100%;margin-top:8px;border-radius:8px;
+        border:1px solid var(--line);display:none"></canvas>
+      <div class="row" id="cornerInputs" style="display:none;margin-top:8px"></div>
+      <div class="note" id="cornerMsg"></div>`;
+  }
+  box.innerHTML = html;
+  for (const key of inputs) {
+    if (key === "corners") continue;
+    const drop = $(`drop_${key}`), input = $(`file_${key}`);
+    drop.onclick = () => input.click();
+    input.onchange = async () => {
+      if (!input.files.length) return;
+      const f = input.files[0];
+      const url = await readAsDataURL(f);
+      state2.extra[key] = { name: f.name, data_url: url };
+      $(`th_${key}`).innerHTML = `<div class="thumb"><img src="${url}" /></div>`;
+      if (key === "scene") { state2.sceneUrl = url; await detectScene(); }
+    };
+  }
+  if (inputs.includes("corners")) {
+    for (const el of ["cornerCanvas", "cornerInputs", "cornerMsg"]) {
+      if (!$(el)) continue;
+    }
+    if (state2.sceneUrl) detectScene();
+  }
+}
+
+function drawCorners(corners) {
+  const cv = $("cornerCanvas");
+  if (!cv || !state2.sceneUrl) return;
+  const img = new Image();
+  img.onload = () => {
+    const W = 520, H = Math.round(W * img.height / img.width);
+    cv.width = W; cv.height = H; cv.style.display = "block";
+    const g = cv.getContext("2d");
+    g.drawImage(img, 0, 0, W, H);
+    if (corners && corners.length === 4) {
+      const kx = W / img.width, ky = H / img.height;
+      g.strokeStyle = "#5b8def"; g.lineWidth = 2;
+      g.beginPath();
+      corners.forEach((p, i) => {
+        const x = p[0] * kx, y = p[1] * ky;
+        i ? g.lineTo(x, y) : g.moveTo(x, y);
+      });
+      g.closePath(); g.stroke();
+      g.fillStyle = "#5b8def";
+      corners.forEach(p => { g.beginPath(); g.arc(p[0] * kx, p[1] * ky, 4, 0, 7); g.fill(); });
+    }
+  };
+  img.src = state2.sceneUrl;
+}
+
+async function detectScene() {
+  if (!state2.sceneUrl) return;
+  $("cornerMsg").textContent = "正在分析场景四角…";
+  try {
+    const res = await fetch("/api/scenes/detect", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ data_url: state2.sceneUrl, name: "scene.png" })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "分析失败");
+    const cal = data.calibration;
+    state2.corners = cal.corners;
+    state2.sceneSize = data.size;
+    const need = cal.needs_manual || cal.confidence < data.min_confidence;
+    $("cornerMsg").innerHTML = need
+      ? `<span style="color:var(--warn)">置信度 ${cal.confidence}（低于 ${data.min_confidence}）：
+         自动定位不可靠，请拖动/修改四角坐标后点「应用校准」</span>`
+      : `置信度 ${cal.confidence}，自动定位通过（${cal.method}）。可以直接提交。`;
+    const names = ["左上", "右上", "右下", "左下"];
+    $("cornerInputs").style.display = "flex";
+    $("cornerInputs").style.cssText = "display:flex;gap:8px;flex-wrap:wrap;margin-top:8px";
+    $("cornerInputs").innerHTML = cal.corners.map((p, i) => `
+      <div style="flex:1;min-width:120px">
+        <label class="f" style="margin:0 0 4px">${names[i]} x / y</label>
+        <div style="display:flex;gap:4px">
+          <input type="number" id="cx${i}" value="${p[0]}" />
+          <input type="number" id="cy${i}" value="${p[1]}" />
+        </div>
+      </div>`).join("") +
+      `<button class="ghost mini" type="button" onclick="applyCorners()" style="align-self:flex-end">
+        应用校准</button>`;
+    drawCorners(cal.corners);
+  } catch (e) {
+    $("cornerMsg").innerHTML = `<span style="color:var(--bad)">${esc(e.message)}</span>`;
+  }
+}
+
+function applyCorners() {
+  const cs = [];
+  for (let i = 0; i < 4; i++) cs.push([Number($(`cx${i}`).value), Number($(`cy${i}`).value)]);
+  state2.corners = cs;
+  drawCorners(cs);
+  $("cornerMsg").innerHTML = '<span style="color:var(--ok)">已使用人工校准的四角</span>';
+}
+
+// ─── 数据来源声明 ───
+function addClaimRow(text = "", kind = "", source = "") {
+  const box = $("claimRows");
+  const row = document.createElement("div");
+  row.className = "claim-row";
+  row.style.cssText = "display:flex;gap:6px;margin-top:6px";
+  row.innerHTML = `
+    <input placeholder="原文，如 199" value="${esc(text)}" data-k="text" style="flex:0 0 30%" />
+    <input placeholder="来源，如 价目表 v3 P2" value="${esc(source)}" data-k="source" style="flex:1" />
+    <button class="ghost mini" type="button" style="flex:0 0 auto">×</button>`;
+  row.querySelector("button").onclick = () => row.remove();
+  box.appendChild(row);
+}
+
+function currentClaims() {
+  const out = [];
+  for (const row of document.querySelectorAll("#claimRows .claim-row")) {
+    const text = row.querySelector('[data-k="text"]').value.trim();
+    const source = row.querySelector('[data-k="source"]').value.trim();
+    if (text) out.push({ text, source });
+  }
+  return out;
+}
+
 function currentCopy() {
   const t = currentTpl();
   if (!t || !(t.copy_fields || []).length) return null;
-  const points = $("cpPoints").value
-    .split("\n").map(s => s.trim()).filter(Boolean).slice(0, 3);
-  return {
-    title: $("cpTitle").value.trim(),
-    subtitle: $("cpSub").value.trim(),
-    points,
-    tag: $("cpTag").value.trim()
-  };
+  const out = {};
+  for (const f of t.copy_fields) {
+    const el = $(`cp_${f}`);
+    if (!el) continue;
+    const v = el.value.trim();
+    if (!v) continue;
+    if (f === "points") out[f] = v.split("\n").map(x => x.trim()).filter(Boolean).slice(0, 3);
+    else if (f === "rows") out[f] = v.split("\n").filter(Boolean)
+      .map(line => line.split("|").map(x => x.trim()));
+    else if (f === "columns") out[f] = v.split("|").map(x => x.trim()).filter(Boolean);
+    else out[f] = v;
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 function syncTplUi() {
   const t = currentTpl();
   if (!t) return;
   $("tplDesc").textContent =
-    `${t.desc}　画布 ${t.canvas ? t.canvas.join("×") : "原尺寸"}，导出 ${t.export}`;
-  $("copyBox").style.display = (t.copy_fields || []).length ? "block" : "none";
+    `${t.desc}　画布 ${t.canvas ? t.canvas.join("×") : "原尺寸"}，导出 ${t.export}` +
+    (t.compose ? "　（确定性合成，不调生成模型）" : "");
+  renderCopyFields(t);
+  renderTplInputs(t);
+  const tpl = t.id;
+  const needsData = ["price", "table", "patent"].includes(tpl) || (t.copy_fields || []).some(f => f === "price_now");
+  $("claimsBox").style.display = needsData ? "block" : "none";
+  if (needsData && !document.querySelectorAll("#claimRows .claim-row").length) addClaimRow();
+  // 合成类模板不需要选引擎与候选数
+  $("cands").disabled = !!t.compose;
 }
 
 async function loadTemplates() {
@@ -581,8 +858,19 @@ async function loadTemplates() {
   syncTplUi();
 }
 
+async function loadTaxonomy() {
+  try {
+    const r = await (await fetch("/api/taxonomy")).json();
+    TAX = r.products || [];
+    const sel = $("category");
+    sel.innerHTML = `<option value="auto" selected>自动识别（推荐）</option>` +
+      (r.products || []).map(p => `<option value="${p.id}">${p.label}</option>`).join("");
+  } catch (e) { /* 拿不到就用默认 */ }
+}
+
 loadConfig();
 loadTemplates();
+loadTaxonomy();
 </script>
 </body>
 </html>

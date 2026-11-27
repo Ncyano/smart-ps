@@ -143,6 +143,71 @@ def panel_patch(src: Image.Image) -> list[tuple[str, Image.Image, str]]:
     return cases
 
 
+# ── 标签区专项：结构分看不出来的那类错 ──
+
+
+def _relabel(obj: Image.Image) -> Image.Image:
+    """把产品中部的标签换掉：轮廓、比例、颜色全不变，只有字变了。
+
+    这正是最危险的一类改动——整图相关照样 0.9+，但标签内容已经不是这个产品了。
+    """
+    from server.app.templates import layout as L
+
+    o = obj.copy()
+    d = ImageDraw.Draw(o)
+    x0, y0 = int(o.width * 0.18), int(o.height * 0.32)
+    x1, y1 = int(o.width * 0.82), int(o.height * 0.62)
+    d.rectangle([x0, y0, x1, y1], fill=(248, 246, 242, 255))
+    f = L.font(max(10, int((y1 - y0) * 0.42)))
+    d.text(((x0 + x1) / 2, (y0 + y1) / 2), "NEW", font=f, fill=(20, 18, 16), anchor="mm")
+    return o
+
+
+def panel_label(src: Image.Image) -> list[tuple[str, Image.Image, str]]:
+    """标签区判定的鉴别力。
+
+    两项能力、一项已知短板，都摆出来：
+
+    - 标签内容被换掉 → 必须不是 pass（这是本项存在的理由：错一个字就是虚假宣传）
+    - 标签原样 → 必须 pass（不能天天误报，否则人会直接忽略这项）
+    - **局部糊 → 抓不到**。标签只占主体 1/4 时，整体清晰度比 0.82 仍在容差内，
+      而缩到 64px 比对的标签相关也有 0.85。这条靠"清晰度项 + 人工确认"兜底，
+      不假装能自动判。要抓局部糊，得换成按文字块检测（未做）。
+    """
+    obj = extract_product(REAL_DIR / "final_1.png")
+    blurred = obj.copy()
+    x0, y0 = int(obj.width * 0.18), int(obj.height * 0.32)
+    x1, y1 = int(obj.width * 0.82), int(obj.height * 0.62)
+    blurred.paste(obj.crop((x0, y0, x1, y1)).filter(ImageFilter.GaussianBlur(5)), (x0, y0))
+    return [
+        ("原样（标签应一致）", paste_on_scene(obj, 0.62, (0.5, 0.54)), "pass"),
+        ("标签被换掉（结构不变）", paste_on_scene(_relabel(obj), 0.62, (0.5, 0.54)), "notpass"),
+        ("标签局部糊（已知短板）", paste_on_scene(blurred, 0.62, (0.5, 0.54)), "any"),
+    ]
+
+
+def run_label_panel(src_path: Image.Image) -> int:
+    print(f"\n{'━' * 96}\n面板 C：标签区专项（结构分照旧很高，但标签已经不是原样）\n{'━' * 96}")
+    print(f"{'用例':<26}{'结构':>8}{'标签分':>8}{'结论':>10}{'期望':>8}{'':>4}")
+    print("-" * 96)
+    wrong = 0
+    for name, im, want in panel_label(src_path):
+        r = F.assess(im, src_path)
+        lab = r["checks"]["label"]
+        st = lab["status"]
+        if want == "pass":
+            ok = st == "pass"
+        elif want == "notpass":
+            ok = st in ("warn", "fail", "unknown")
+        else:
+            ok = True
+        if not ok:
+            wrong += 1
+        score = "—" if lab.get("score") is None else f"{lab['score']:.2f}"
+        print(f"{name:<26}{r['structure']:>8.3f}{score:>8}{st:>10}{want:>8}{'✓' if ok else '✗':>4}")
+    return wrong
+
+
 # ─────────────────────────── 跑表 ───────────────────────────
 
 
@@ -194,6 +259,7 @@ def main() -> int:
     factory = F.as_rgb(Image.open(FACTORY))
     wrong += run_panel("面板 B：patch 模式（工厂图多实例，只测特征）", factory,
                        panel_patch(factory), {"B"})
+    wrong += run_label_panel(obj_src)
 
     print("\n" + "=" * 96)
     print(f"合计误判 {wrong} 条")

@@ -1,0 +1,33 @@
+# 合规检查规则 —— 改这里就能加词，不用动代码。
+#
+# 三类词表：
+#   absolute   绝对化用语（硬拦截）
+#   efficacy   疗效宣称（默认待人工；器械类可放行，见 allowed_products）
+#   trademark  第三方商标（硬拦截；品牌名由客户自己维护，仓库不留真实名单）
+#
+# 覆盖内置词表：
+#   [[rule]] 里写 replace = true 表示**替换**内置词表，不写表示**追加**。
+#
+# 例：加两个绝对化用语，并让器械类也能写"治疗"
+#   [[rule.absolute]]  ← 注意 TOML 语法，这里用 [rule.absolute] 段
+#
+# 正确写法：
+#   [rule.absolute]
+#   words = ["天花板", "顶配"]
+#
+#   [rule.efficacy]
+#   allowed_products = ["device"]
+#   words = ["辅助改善"]
+
+[rule.absolute]
+words = [
+  "天花板",
+  "顶配",
+  "断货王",
+]
+
+[rule.trademark]
+words = [
+  # 客户把要拦的品牌名填在这里，一行一个。
+  # 仓库里不放真实竞品名单：那是客户的商业信息，也不该出现在公开仓库。
+]

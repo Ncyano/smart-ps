@@ -20,6 +20,15 @@
 """
 
 from .base import Template
-from .builtin import ALL, get
+from .builtin import ALL as _BUILTIN
+from .extra import EXTRA as _EXTRA
+
+ALL: list[Template] = [*_BUILTIN, *_EXTRA]
+_BY_ID = {t.id: t for t in ALL}
+
+
+def get(tid: str | None) -> Template:
+    return _BY_ID.get(str(tid or "scene").strip()) or _BY_ID["scene"]
+
 
 __all__ = ["Template", "ALL", "get"]

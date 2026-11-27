@@ -65,7 +65,11 @@ def noisy_photo(size: tuple[int, int] = (600, 600)) -> Image.Image:
 
 # ─── 1. 注册表 ───
 def test_registry() -> None:
-    check("内置三个模板", len(T.ALL) == 3, ", ".join(t.id for t in T.ALL))
+    ids = [t.id for t in T.ALL]
+    check("内置模板齐全（3 生成 + 5 合成）",
+          {"scene", "white_bg", "kv", "pair", "price", "patent", "table", "screen"} <= set(ids),
+          ", ".join(ids))
+    check("合成类模板不调模型", all(T.get(i).compose for i in ("pair", "patent", "table", "screen")))
     check("未知 id 兜底到 scene", T.get("nope").id == "scene")
     check("None 兜底到 scene", T.get(None).id == "scene")
     for t in T.ALL:

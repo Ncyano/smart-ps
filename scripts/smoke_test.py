@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from PIL import Image, ImageDraw  # noqa: E402
 
+from server.app import gate  # noqa: E402
 from server.app.pipeline.run import run_batch  # noqa: E402
 from server.app.schemas import BatchRequest, ImagePayload  # noqa: E402
 
@@ -53,6 +54,7 @@ def main() -> int:
         candidates=3,
         materials=materials,
         exemplars=exemplars,
+        rights="owned",          # 授权声明，否则闸门只能给"未声明"
     )
     batch = run_batch(req)
 
@@ -68,9 +70,26 @@ def main() -> int:
           f"bg={batch['style_profile']['composition']['bg']}")
     print("-" * 60)
     for c in batch["candidates"]:
-        print(f"候选{c['index']}  {'★' if c['chosen'] else ' '}  "
+        d = c["delivery"]
+        print(f"候选{c['index']}  {'★' if c['suggested'] else ' '}  "
               f"总分 {c['total']:.3f}  保真 {c['scores']['fidelity']}  "
-              f"风格 {c['scores']['style']}  质量 {c['scores']['quality']}  {c['verdict']}")
+              f"风格 {c['scores']['style']}  质量 {c['scores']['quality']}  "
+              f"{d['label']}　卡在：{'、'.join(d['blockers']) or '—'}")
+
+    print("-" * 60)
+    print("闸门明细（候选 1）")
+    for ch in batch["candidates"][0]["delivery"]["checks"]:
+        print(f"  [{ch['status']:<7}] {ch['label']:<8} {ch['detail'][:56]}")
+
+    # 人工确认后重算：这是唯一能把"待人工"变"可交付"的路径
+    batch["candidates"][0]["subject_confirmed"] = True
+    batch["candidates"][0]["subject_confirmed_by"] = "冒烟测试"
+    batch["candidates"][0]["subject_confirmed_at"] = "2026-01-01T00:00:00"
+    gate.apply(batch)
+    after = batch["candidates"][0]["delivery"]
+    print("-" * 60)
+    print(f"确认主体后：候选1 → {after['label']}（正式交付闸门 {batch['delivery']['formal_ready']}）")
+    print(f"汇总       : {batch['delivery']['summary']}")
     print("=" * 60)
     print(f"成品目录: {Path('data/batches') / batch['id'] / 'final'}")
     return 0
